@@ -1,27 +1,37 @@
 "use client";
 
 import { useState } from "react";
+import { todayLocal } from "@/lib/date";
+import { CATEGORIES } from "@/lib/categories";
+import { errorMessage, type TransactionInput } from "@/lib/types";
 
-export default function AddExpenseForm({ onAdd, trigger, onOpenChange }: { onAdd?: (expense: any) => Promise<void> | void, trigger?: React.ReactNode, onOpenChange?: (open: boolean) => void }) {
+export default function AddExpenseForm({ onAdd, trigger, onOpenChange }: { onAdd?: (expense: TransactionInput) => Promise<void> | void, trigger?: React.ReactNode, onOpenChange?: (open: boolean) => void }) {
     const [isOpen, setIsOpen] = useState(false);
 
     const toggleOpen = (open: boolean) => {
+        // Tanggal default selalu hari ini saat form dibuka, walau app dibiarkan terbuka lewat tengah malam
+        if (open) setFormData((prev) => ({ ...prev, date: todayLocal() }));
+        setError(null);
         setIsOpen(open);
         if (onOpenChange) onOpenChange(open);
     };
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [formData, setFormData] = useState({
+    const [formData, setFormData] = useState<Omit<TransactionInput, "amount"> & { amount: string }>({
         type: "expense",
         amount: "",
         category: "Food",
-        date: new Date().toISOString().split('T')[0],
+        date: todayLocal(),
         note: "",
     });
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!formData.amount) return;
+        const amount = Number(formData.amount);
+        if (!Number.isFinite(amount) || amount <= 0) {
+            setError("Jumlah harus lebih dari 0.");
+            return;
+        }
 
         setError(null);
         setLoading(true);
@@ -30,14 +40,14 @@ export default function AddExpenseForm({ onAdd, trigger, onOpenChange }: { onAdd
             if (onAdd) {
                 await onAdd({
                     ...formData,
-                    amount: Number(formData.amount)
+                    amount
                 });
             }
             setFormData({ ...formData, amount: "", note: "" });
             toggleOpen(false);
-        } catch (err: any) {
+        } catch (err) {
             console.error("Failed to add transaction:", err);
-            setError(err.message || "Gagal menyimpan transaksi.");
+            setError(errorMessage(err, "Gagal menyimpan transaksi."));
         } finally {
             setLoading(false);
         }
@@ -103,6 +113,7 @@ export default function AddExpenseForm({ onAdd, trigger, onOpenChange }: { onAdd
                                     type="number"
                                     autoFocus
                                     required
+                                    min="1"
                                     disabled={loading}
                                     placeholder="50000"
                                     value={formData.amount}
@@ -120,13 +131,9 @@ export default function AddExpenseForm({ onAdd, trigger, onOpenChange }: { onAdd
                                         onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                                         className="w-full px-4 py-3 rounded-xl bg-background border border-border focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all appearance-none disabled:opacity-50"
                                     >
-                                        <option value="Food">Food 🍔</option>
-                                        <option value="Transport">Transport 🚗</option>
-                                        <option value="Entertainment">Entertainment 🎬</option>
-                                        <option value="Shopping">Shopping 🛍️</option>
-                                        <option value="Bills">Bills 📱</option>
-                                        <option value="Salary">Salary 💰</option>
-                                        <option value="Other">Other 📦</option>
+                                        {CATEGORIES.map((c) => (
+                                            <option key={c.value} value={c.value}>{c.value} {c.icon}</option>
+                                        ))}
                                     </select>
                                 </div>
 

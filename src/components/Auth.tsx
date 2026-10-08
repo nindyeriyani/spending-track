@@ -10,6 +10,7 @@ import {
     getRedirectResult,
     GoogleAuthProvider
 } from "firebase/auth";
+import { errorCode, errorMessage } from "@/lib/types";
 
 export default function Auth() {
     const [isLogin, setIsLogin] = useState(true);
@@ -31,7 +32,7 @@ export default function Auth() {
             })
             .catch((err) => {
                 console.error("Redirect Auth Error:", err);
-                if (err.code !== "auth/no-auth-event") {
+                if (errorCode(err) !== "auth/no-auth-event") {
                     setError("Gagal menyelesaikan login otomatis. Silakan coba login manual.");
                 }
                 setRedirectProcessing(false);
@@ -49,9 +50,9 @@ export default function Auth() {
             } else {
                 await createUserWithEmailAndPassword(auth, email, password);
             }
-        } catch (err: any) {
+        } catch (err) {
             console.error(err);
-            setError(err.message || "An error occurred during authentication");
+            setError(errorMessage(err, "An error occurred during authentication"));
         } finally {
             setLoading(false);
         }
@@ -71,13 +72,13 @@ export default function Auth() {
             } else {
                 await signInWithPopup(auth, provider);
             }
-        } catch (err: any) {
+        } catch (err) {
             console.error(err);
-            if (err.code === "auth/popup-blocked") {
+            if (errorCode(err) === "auth/popup-blocked") {
                 setError("Popup diblokir. Mencoba metode lain...");
                 await signInWithRedirect(auth, provider);
             } else {
-                setError(err.message || "An error occurred during Google login");
+                setError(errorMessage(err, "An error occurred during Google login"));
             }
         } finally {
             setLoading(false);
