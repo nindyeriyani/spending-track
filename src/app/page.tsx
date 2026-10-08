@@ -1,12 +1,15 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import AddExpenseForm from "@/components/AddExpenseForm";
 import AddGoalForm from "@/components/AddGoalForm";
 import Auth from "@/components/Auth";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { auth, db } from "@/lib/firebase";
+import { monthKey, parseLocalDate } from "@/lib/date";
+import { CATEGORIES, categoryIcon } from "@/lib/categories";
+import type { Goal, GoalInput, Transaction, TransactionInput } from "@/lib/types";
 import { onAuthStateChanged, signOut, User } from "firebase/auth";
 import {
   collection,
@@ -23,18 +26,16 @@ type Tab = "overview" | "budget";
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
-  const [balance, setBalance] = useState(0);
-  const [totalIncome, setTotalIncome] = useState(0);
-  const [totalExpense, setTotalExpense] = useState(0);
-  const [recentTransactions, setRecentTransactions] = useState<any[]>([]);
-  const [goals, setGoals] = useState<any[]>([]);
+  const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
+  const [goals, setGoals] = useState<Goal[]>([]);
   const [mounted, setMounted] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [dataLoading, setDataLoading] = useState(true);
+  const [goalsLoading, setGoalsLoading] = useState(true);
 
-  const [editingGoal, setEditingGoal] = useState<any | null>(null);
-  const [editingTransaction, setEditingTransaction] = useState<any | null>(null);
+  const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [expandedActivityId, setExpandedActivityId] = useState<string | null>(null);
   const [currentMonth] = useState(new Date());
@@ -42,12 +43,42 @@ export default function Home() {
   // Custom Alert State
   const [alert, setAlert] = useState<{ message: string, type: "success" | "error" | "confirm", confirmText?: string, onConfirm?: () => void } | null>(null);
 
-  const showAlert = (message: string, type: "success" | "error" = "success") => {
-    setAlert({ message, type });
-    setTimeout(() => setAlert(null), 3000);
+  const alertTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearAlertTimer = () => {
+    if (alertTimer.current) clearTimeout(alertTimer.current);
+    alertTimer.current = null;
   };
+
+  // Timer lama selalu dibatalkan supaya tidak menutup alert/konfirmasi yang muncul sesudahnya
+  const showAlert = useCallback((message: string, type: "success" | "error" = "success") => {
+    clearAlertTimer();
+    setAlert({ message, type });
+    alertTimer.current = setTimeout(() => setAlert(null), 3000);
+  }, []);
+
+  const showConfirm = (message: string, onConfirm: () => void, confirmText?: string) => {
+    clearAlertTimer();
+    setAlert({ message, type: "confirm", confirmText, onConfirm });
+  };
+
+  const closeAlert = () => {
+    clearAlertTimer();
+    setAlert(null);
+  };
+
+  useEffect(() => clearAlertTimer, []);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
+      // Bersihkan data akun sebelumnya agar tidak terlihat oleh akun berikutnya
+      setRecentTransactions([]);
+      setGoals([]);
+      setDataLoading(true);
+      setGoalsLoading(true);
+      setEditingGoal(null);
+      setEditingTransaction(null);
+      setExpandedActivityId(null);
+      setActiveTab("overview");
       setUser(user);
       setAuthLoading(false);
       setMounted(true);
@@ -62,56 +93,60 @@ export default function Home() {
       collection(db, "users", user.uid, "transactions"),
       orderBy("date", "desc")
     );
-    setDataLoading(true);
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const txs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      const txs = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as TransactionInput) }));
       setRecentTransactions(txs);
       setDataLoading(false);
+    }, (err) => {
+      console.error("Failed to load transactions:", err);
+      setDataLoading(false);
+      showAlert("Gagal memuat transaksi.", "error");
     });
     return () => unsubscribe();
-  }, [user]);
+  }, [user, showAlert]);
 
   // Sync Goals
   useEffect(() => {
     if (!user) return;
     const q = collection(db, "users", user.uid, "goals");
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const gs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      const gs = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as GoalInput) }));
       setGoals(gs);
+      setGoalsLoading(false);
+    }, (err) => {
+      console.error("Failed to load goals:", err);
+      setGoalsLoading(false);
+      showAlert("Gagal memuat target.", "error");
     });
     return () => unsubscribe();
-  }, [user]);
+  }, [user, showAlert]);
 
   // Totals Calculation
   const filteredTransactions = useMemo(() => {
-    return recentTransactions.filter((tx) => {
-      const txDate = new Date(tx.date);
-      return txDate.getMonth() === currentMonth.getMonth() && txDate.getFullYear() === currentMonth.getFullYear();
-    });
+    const key = monthKey(currentMonth);
+    return recentTransactions.filter((tx) => typeof tx.date === "string" && tx.date.startsWith(key));
   }, [recentTransactions, currentMonth]);
 
-  useEffect(() => {
+  const { totalIncome, totalExpense, balance } = useMemo(() => {
     let income = 0;
     let expense = 0;
     filteredTransactions.forEach((tx) => {
       if (tx.type === "income") income += tx.amount;
       else expense += tx.amount;
     });
-    setTotalIncome(income);
-    setTotalExpense(expense);
-    setBalance(income - expense);
+    return { totalIncome: income, totalExpense: expense, balance: income - expense };
   }, [filteredTransactions]);
 
   const handleLogout = async () => {
-    setAlert({
-      message: "Are you sure you want to sign out?",
-      type: "confirm",
-      confirmText: "Sign Out",
-      onConfirm: async () => {
-        try { await signOut(auth); } catch (e) { showAlert("Gagal keluar.", "error"); }
-        setAlert(null);
+    showConfirm("Are you sure you want to sign out?", async () => {
+      closeAlert();
+      try {
+        await signOut(auth);
+      } catch (e) {
+        console.error("Sign out failed:", e);
+        showAlert("Gagal keluar.", "error");
       }
-    });
+    }, "Sign Out");
   };
 
   const formattedMonth = currentMonth.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
@@ -126,7 +161,7 @@ export default function Home() {
     doc.text(`Total Pengeluaran: Rp ${totalExpense.toLocaleString()}`, 14, 46);
 
     const tableRows = filteredTransactions.map(tx => [
-      new Date(tx.date).toLocaleDateString("id-ID"),
+      parseLocalDate(tx.date).toLocaleDateString("id-ID"),
       tx.category,
       tx.note || "-",
       tx.type === "income" ? "Pemasukan" : "Pengeluaran",
@@ -144,12 +179,12 @@ export default function Home() {
     doc.save(`spending_track_${formattedMonth.replace(/ /g, '_')}.pdf`);
   };
 
-  const handleAddExpense = async (expense: any) => {
+  const handleAddExpense = async (expense: TransactionInput) => {
     if (!user) return;
     await addDoc(collection(db, "users", user.uid, "transactions"), expense);
   };
 
-  const handleAddGoal = async (goal: any) => {
+  const handleAddGoal = async (goal: GoalInput) => {
     if (!user) return;
     await addDoc(collection(db, "users", user.uid, "goals"), goal);
   };
@@ -185,6 +220,8 @@ export default function Home() {
               className="w-10 h-10 rounded-full border-2 border-primary/20 p-0.5 overflow-hidden ring-2 ring-primary/5 cursor-pointer hover:ring-primary/40 transition-all active:scale-95"
             >
               {user.photoURL ? (
+                // Foto profil Google dari domain eksternal; next/image butuh remotePatterns dan tidak sepadan untuk avatar 40px
+                // eslint-disable-next-line @next/next/no-img-element
                 <img src={user.photoURL} className="w-full h-full object-cover rounded-full" alt="Profile" />
               ) : (
                 <div className="w-full h-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs uppercase">
@@ -262,7 +299,7 @@ export default function Home() {
                 {filteredTransactions.length === 0 ? (
                   <div className="text-center py-12 opacity-40 font-medium italic premium-card">No activity this month</div>
                 ) : (
-                  filteredTransactions.slice(0, 10).map((tx: any) => {
+                  filteredTransactions.slice(0, 10).map((tx) => {
                     const isExpanded = expandedActivityId === tx.id;
                     return (
                       <div
@@ -272,7 +309,7 @@ export default function Home() {
                       >
                         <div className="flex items-center gap-4">
                           <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl shrink-0 ${tx.type === "income" ? "bg-success/10 text-success" : "bg-primary/5 text-primary"}`}>
-                            {tx.category === "Food" ? "🍔" : tx.category === "Transport" ? "🚕" : tx.category === "Entertainment" ? "🎬" : tx.category === "Shopping" ? "🛍️" : tx.category === "Bills" ? "📱" : "💰"}
+                            {categoryIcon(tx.category)}
                           </div>
                           <div className="flex-1 flex flex-col min-w-0">
                             <span className="font-bold text-sm tracking-tight truncate">{tx.category}</span>
@@ -282,14 +319,14 @@ export default function Home() {
                             <span className={`font-black text-sm tracking-tighter ${tx.type === "income" ? "text-success" : "text-destructive"}`}>
                               {tx.type === "income" ? "+" : "-"}{tx.amount.toLocaleString()}
                             </span>
-                            <span className="text-[10px] font-bold opacity-30">{new Date(tx.date).toLocaleDateString("id-ID", { day: "numeric", month: "short" })}</span>
+                            <span className="text-[10px] font-bold opacity-30">{parseLocalDate(tx.date).toLocaleDateString("id-ID", { day: "numeric", month: "short" })}</span>
                           </div>
                         </div>
 
                         {isExpanded && (
                           <div className="flex gap-2 pt-2 border-t border-muted border-dashed animate-[fade-in_0.2s_ease-out]">
                             <button
-                              onClick={(e) => { e.stopPropagation(); setEditingTransaction(tx); }}
+                              onClick={(e) => { e.stopPropagation(); setEditingTransaction({ ...tx, note: tx.note ?? "" }); }}
                               className="flex-1 py-2.5 rounded-xl bg-primary/5 text-primary font-bold text-xs hover:bg-primary/10 transition-colors flex items-center justify-center gap-2"
                             >
                               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
@@ -298,14 +335,15 @@ export default function Home() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setAlert({
-                                  message: "Hapus transaksi ini?",
-                                  type: "confirm",
-                                  onConfirm: async () => {
-                                    await deleteDoc(doc(db, "users", user.uid!, "transactions", tx.id));
-                                    showAlert("Transaksi berhasil dihapus.");
-                                    setAlert(null);
+                                showConfirm("Hapus transaksi ini?", async () => {
+                                  closeAlert();
+                                  try {
+                                    await deleteDoc(doc(db, "users", user.uid, "transactions", tx.id));
                                     setExpandedActivityId(null);
+                                    showAlert("Transaksi berhasil dihapus.");
+                                  } catch (err) {
+                                    console.error("Failed to delete transaction:", err);
+                                    showAlert("Gagal menghapus transaksi.", "error");
                                   }
                                 });
                               }}
@@ -343,12 +381,12 @@ export default function Home() {
               </div>
 
               <div className="flex flex-col gap-4 relative min-h-[100px]">
-                {dataLoading && <div className="absolute inset-0 bg-background/50 flex items-center justify-center z-10"><div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>}
+                {goalsLoading && <div className="absolute inset-0 bg-background/50 flex items-center justify-center z-10"><div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>}
                 {goals.length === 0 ? (
                   <div className="text-center py-12 opacity-40 font-medium italic premium-card">No goals set yet</div>
                 ) : (
                   goals.map(goal => {
-                    const progress = Math.min((goal.currentAmount / goal.targetAmount) * 100, 100);
+                    const progress = goal.targetAmount > 0 ? Math.min(Math.max((goal.currentAmount / goal.targetAmount) * 100, 0), 100) : 0;
                     return (
                       <div
                         key={goal.id}
@@ -358,13 +396,14 @@ export default function Home() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            setAlert({
-                              message: `Hapus target "${goal.name}"?`,
-                              type: "confirm",
-                              onConfirm: async () => {
-                                await deleteDoc(doc(db, "users", user.uid!, "goals", goal.id));
+                            showConfirm(`Hapus target "${goal.name}"?`, async () => {
+                              closeAlert();
+                              try {
+                                await deleteDoc(doc(db, "users", user.uid, "goals", goal.id));
                                 showAlert("Target berhasil dihapus.");
-                                setAlert(null);
+                              } catch (err) {
+                                console.error("Failed to delete goal:", err);
+                                showAlert("Gagal menghapus target.", "error");
                               }
                             });
                           }}
@@ -420,11 +459,11 @@ export default function Home() {
               <div className="flex gap-3 w-full">
                 {alert.type === "confirm" ? (
                   <>
-                    <button onClick={() => setAlert(null)} className="flex-1 py-3.5 px-4 rounded-2xl bg-muted font-bold text-xs uppercase tracking-widest hover:bg-muted/80 transition-colors">Batal</button>
+                    <button onClick={closeAlert} className="flex-1 py-3.5 px-4 rounded-2xl bg-muted font-bold text-xs uppercase tracking-widest hover:bg-muted/80 transition-colors">Batal</button>
                     <button onClick={alert.onConfirm} className="flex-1 py-3.5 px-4 rounded-2xl bg-destructive text-white font-bold text-xs uppercase tracking-widest hover:opacity-90 transition-opacity shadow-lg shadow-destructive/20">{alert.confirmText || "Hapus"}</button>
                   </>
                 ) : (
-                  <button onClick={() => setAlert(null)} className="flex-1 py-4 px-4 rounded-2xl bg-primary text-white font-bold text-sm hover:opacity-90 transition-opacity shadow-lg shadow-primary/20">Oke</button>
+                  <button onClick={closeAlert} className="flex-1 py-4 px-4 rounded-2xl bg-primary text-white font-bold text-sm hover:opacity-90 transition-opacity shadow-lg shadow-primary/20">Oke</button>
                 )}
               </div>
             </div>
@@ -442,6 +481,18 @@ export default function Home() {
                 </button>
               </div>
               <div className="flex flex-col gap-4">
+                <div className="flex p-1 bg-muted rounded-2xl">
+                  {(["expense", "income"] as const).map(t => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setEditingTransaction({ ...editingTransaction, type: t })}
+                      className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${editingTransaction.type === t ? "bg-background shadow-sm text-foreground" : "text-muted-foreground"}`}
+                    >
+                      {t === "expense" ? "Pengeluaran" : "Pemasukan"}
+                    </button>
+                  ))}
+                </div>
                 <div className="flex flex-col gap-1.5">
                   <label className="text-[10px] font-bold text-muted-foreground uppercase ml-1">Kategori</label>
                   <select
@@ -449,9 +500,13 @@ export default function Home() {
                     onChange={(e) => setEditingTransaction({ ...editingTransaction, category: e.target.value })}
                     className="w-full bg-muted border-none p-4 rounded-2xl font-bold appearance-none outline-none focus:ring-2 ring-primary transition-all"
                   >
-                    {["Food", "Transport", "Entertainment", "Shopping", "Bills", "Social"].map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
+                    {CATEGORIES.map(c => (
+                      <option key={c.value} value={c.value}>{c.value} {c.icon}</option>
                     ))}
+                    {/* Kategori lama yang tidak ada di daftar tetap bisa dipertahankan */}
+                    {!CATEGORIES.some(c => c.value === editingTransaction.category) && (
+                      <option value={editingTransaction.category}>{editingTransaction.category}</option>
+                    )}
                   </select>
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -467,6 +522,7 @@ export default function Home() {
                   <label className="text-[10px] font-bold text-muted-foreground uppercase ml-1">Jumlah (Rp)</label>
                   <input
                     type="number"
+                    min="1"
                     value={editingTransaction.amount}
                     onChange={(e) => setEditingTransaction({ ...editingTransaction, amount: Number(e.target.value) })}
                     className="w-full bg-muted border-none p-4 rounded-2xl font-bold focus:ring-2 ring-primary outline-none transition-all"
@@ -475,14 +531,25 @@ export default function Home() {
               </div>
               <button
                 onClick={async () => {
-                  await updateDoc(doc(db, "users", user.uid!, "transactions", editingTransaction.id), {
-                    category: editingTransaction.category,
-                    note: editingTransaction.note,
-                    amount: editingTransaction.amount
-                  });
-                  showAlert("Transaksi berhasil diperbarui.");
-                  setEditingTransaction(null);
-                  setExpandedActivityId(null);
+                  const amount = Number(editingTransaction.amount);
+                  if (!Number.isFinite(amount) || amount <= 0) {
+                    showAlert("Jumlah harus lebih dari 0.", "error");
+                    return;
+                  }
+                  try {
+                    await updateDoc(doc(db, "users", user.uid, "transactions", editingTransaction.id), {
+                      type: editingTransaction.type,
+                      category: editingTransaction.category,
+                      note: editingTransaction.note,
+                      amount
+                    });
+                    setEditingTransaction(null);
+                    setExpandedActivityId(null);
+                    showAlert("Transaksi berhasil diperbarui.");
+                  } catch (err) {
+                    console.error("Failed to update transaction:", err);
+                    showAlert("Gagal memperbarui transaksi.", "error");
+                  }
                 }}
                 className="w-full py-4 bg-primary text-white font-bold rounded-2xl hover:opacity-90 transition-opacity active:scale-95 shadow-xl shadow-primary/20"
               >
@@ -516,6 +583,7 @@ export default function Home() {
                   <label className="text-[10px] font-bold text-muted-foreground uppercase ml-1">Terumpul (Rp)</label>
                   <input
                     type="number"
+                    min="0"
                     value={editingGoal.currentAmount}
                     onChange={(e) => setEditingGoal({ ...editingGoal, currentAmount: Number(e.target.value) })}
                     className="w-full bg-muted border-none p-4 rounded-2xl font-bold focus:ring-2 ring-primary transition-all outline-none"
@@ -525,6 +593,7 @@ export default function Home() {
                   <label className="text-[10px] font-bold text-muted-foreground uppercase ml-1">Target Total (Rp)</label>
                   <input
                     type="number"
+                    min="1"
                     value={editingGoal.targetAmount}
                     onChange={(e) => setEditingGoal({ ...editingGoal, targetAmount: Number(e.target.value) })}
                     className="w-full bg-muted border-none p-4 rounded-2xl font-bold focus:ring-2 ring-primary transition-all outline-none"
@@ -533,13 +602,33 @@ export default function Home() {
               </div>
               <button
                 onClick={async () => {
-                  await updateDoc(doc(db, "users", user.uid!, "goals", editingGoal.id), {
-                    name: editingGoal.name,
-                    currentAmount: editingGoal.currentAmount,
-                    targetAmount: editingGoal.targetAmount
-                  });
-                  showAlert("Target berhasil diperbarui.");
-                  setEditingGoal(null);
+                  const name = String(editingGoal.name ?? "").trim();
+                  const currentAmount = Number(editingGoal.currentAmount);
+                  const targetAmount = Number(editingGoal.targetAmount);
+                  if (!name) {
+                    showAlert("Nama target tidak boleh kosong.", "error");
+                    return;
+                  }
+                  if (!Number.isFinite(targetAmount) || targetAmount <= 0) {
+                    showAlert("Target harus lebih dari 0.", "error");
+                    return;
+                  }
+                  if (!Number.isFinite(currentAmount) || currentAmount < 0) {
+                    showAlert("Jumlah terkumpul tidak boleh negatif.", "error");
+                    return;
+                  }
+                  try {
+                    await updateDoc(doc(db, "users", user.uid, "goals", editingGoal.id), {
+                      name,
+                      currentAmount,
+                      targetAmount
+                    });
+                    setEditingGoal(null);
+                    showAlert("Target berhasil diperbarui.");
+                  } catch (err) {
+                    console.error("Failed to update goal:", err);
+                    showAlert("Gagal memperbarui target.", "error");
+                  }
                 }}
                 className="w-full py-4 bg-primary text-white font-bold rounded-2xl hover:opacity-90 transition-opacity active:scale-95"
               >

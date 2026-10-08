@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { errorMessage, type GoalInput } from "@/lib/types";
 
-export default function AddGoalForm({ onAdd, trigger, onOpenChange }: { onAdd?: (goal: any) => Promise<void> | void, trigger?: React.ReactNode, onOpenChange?: (open: boolean) => void }) {
+export default function AddGoalForm({ onAdd, trigger, onOpenChange }: { onAdd?: (goal: GoalInput) => Promise<void> | void, trigger?: React.ReactNode, onOpenChange?: (open: boolean) => void }) {
     const [isOpen, setIsOpen] = useState(false);
 
     const toggleOpen = (open: boolean) => {
+        setError(null);
         setIsOpen(open);
         if (onOpenChange) onOpenChange(open);
     };
@@ -19,7 +21,18 @@ export default function AddGoalForm({ onAdd, trigger, onOpenChange }: { onAdd?: 
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!formData.name || !formData.targetAmount) return;
+        const name = formData.name.trim();
+        const targetAmount = Number(formData.targetAmount);
+        const currentAmount = Number(formData.currentAmount) || 0;
+        if (!name) return;
+        if (!Number.isFinite(targetAmount) || targetAmount <= 0) {
+            setError("Target harus lebih dari 0.");
+            return;
+        }
+        if (currentAmount < 0) {
+            setError("Jumlah terkumpul tidak boleh negatif.");
+            return;
+        }
 
         setError(null);
         setLoading(true);
@@ -27,16 +40,16 @@ export default function AddGoalForm({ onAdd, trigger, onOpenChange }: { onAdd?: 
         try {
             if (onAdd) {
                 await onAdd({
-                    name: formData.name,
-                    targetAmount: Number(formData.targetAmount),
-                    currentAmount: Number(formData.currentAmount) || 0,
+                    name,
+                    targetAmount,
+                    currentAmount,
                 });
             }
             setFormData({ name: "", targetAmount: "", currentAmount: "0" });
             toggleOpen(false);
-        } catch (err: any) {
+        } catch (err) {
             console.error("Failed to add goal:", err);
-            setError(err.message || "Gagal menyimpan target.");
+            setError(errorMessage(err, "Gagal menyimpan target."));
         } finally {
             setLoading(false);
         }
@@ -96,6 +109,7 @@ export default function AddGoalForm({ onAdd, trigger, onOpenChange }: { onAdd?: 
                                 <input
                                     type="number"
                                     required
+                                    min="1"
                                     disabled={loading}
                                     placeholder="10000000"
                                     value={formData.targetAmount}
@@ -108,6 +122,7 @@ export default function AddGoalForm({ onAdd, trigger, onOpenChange }: { onAdd?: 
                                 <label className="text-sm font-medium text-foreground">Already Saved (Rp - Optional)</label>
                                 <input
                                     type="number"
+                                    min="0"
                                     disabled={loading}
                                     placeholder="0"
                                     value={formData.currentAmount}
