@@ -1,0 +1,82 @@
+rules_version = '2';
+
+// Setiap user hanya boleh mengakses data di bawah users/{uid} miliknya sendiri,
+// dan setiap dokumen yang ditulis harus sesuai bentuk di src/lib/types.ts.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasOnly(['type', 'amount', 'category', 'date', 'note'])
+        && data.keys().hasAll(['type', 'amount', 'category', 'date', 'note'])
+        && data.type in ['income', 'expense']
+        && data.amount is number && data.amount > 0
+        && data.category is string && data.category.size() > 0 && data.category.size() <= 50
+        && data.date is string && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.note is string && data.note.size() <= 500;
+    }
+
+    // `category` opsional: kategori pengeluaran yang terhubung ke target
+    function isValidGoal(data) {
+      return data.keys().hasOnly(['name', 'targetAmount', 'currentAmount', 'category'])
+        && data.keys().hasAll(['name', 'targetAmount', 'currentAmount'])
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
+        && data.targetAmount is number && data.targetAmount > 0
+        && data.currentAmount is number && data.currentAmount >= 0
+        && (!('category' in data) || data.category in budgetCategories().values());
+    }
+
+    // ID dokumen -> nama kategori, harus sama dengan EXPENSE_CATEGORIES di src/lib/categories.ts
+    function budgetCategories() {
+      return {
+        'tabungan-haji': 'Tabungan Haji',
+        'orang-tua': 'Orang Tua',
+        'dana-darurat': 'Dana Darurat',
+        'makan-jajan': 'Makan/Jajan',
+        'transportasi': 'Transportasi',
+        'servis-motor': 'Servis Motor',
+        'skincare-perawatan': 'Skincare & Perawatan',
+        'tabungan-pakaian': 'Tabungan Pakaian',
+        'kuota-langganan': 'Kuota & Langganan',
+        'kebutuhan-rumah': 'Kebutuhan Rumah',
+        'sedekah': 'Sedekah',
+        'kado-traktiran': 'Kado & Traktiran',
+        'hiburan': 'Hiburan',
+        'pengembangan-diri': 'Pengembangan Diri',
+        'wishlist': 'Wishlist',
+        'cadangan-tak-terduga': 'Cadangan Tak Terduga'
+      };
+    }
+
+    function isValidBudget(budgetId, data) {
+      return data.keys().hasOnly(['category', 'limit'])
+        && data.keys().hasAll(['category', 'limit'])
+        && budgetId in budgetCategories()
+        && data.category == budgetCategories()[budgetId]
+        && data.limit is number && data.limit > 0;
+    }
+
+    match /users/{userId}/transactions/{txId} {
+      allow read, delete: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidTransaction(request.resource.data);
+    }
+
+    match /users/{userId}/goals/{goalId} {
+      allow read, delete: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidGoal(request.resource.data);
+    }
+
+    match /users/{userId}/budgets/{budgetId} {
+      allow read, delete: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidBudget(budgetId, request.resource.data);
+    }
+
+    // Selain path di atas, semuanya ditolak.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

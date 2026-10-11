@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import AmountInput from "@/components/AmountInput";
 import { todayLocal } from "@/lib/date";
-import { CATEGORIES } from "@/lib/categories";
+import { EXPENSE_CATEGORIES, categoriesFor } from "@/lib/categories";
 import { errorMessage, type TransactionInput } from "@/lib/types";
 
 export default function AddExpenseForm({ onAdd, trigger, onOpenChange }: { onAdd?: (expense: TransactionInput) => Promise<void> | void, trigger?: React.ReactNode, onOpenChange?: (open: boolean) => void }) {
@@ -20,7 +21,7 @@ export default function AddExpenseForm({ onAdd, trigger, onOpenChange }: { onAdd
     const [formData, setFormData] = useState<Omit<TransactionInput, "amount"> & { amount: string }>({
         type: "expense",
         amount: "",
-        category: "Food",
+        category: EXPENSE_CATEGORIES[0].value,
         date: todayLocal(),
         note: "",
     });
@@ -64,7 +65,7 @@ export default function AddExpenseForm({ onAdd, trigger, onOpenChange }: { onAdd
                     onClick={() => toggleOpen(true)}
                     className="bg-primary hover:bg-primary/90 text-primary-foreground px-6 py-3 rounded-full font-bold transition-all shadow-xl shadow-primary/20 active:scale-95 flex items-center gap-2"
                 >
-                    <span className="text-xl">+</span> Add New
+                    <span className="text-xl">+</span> Tambah
                 </button>
             )}
 
@@ -72,7 +73,7 @@ export default function AddExpenseForm({ onAdd, trigger, onOpenChange }: { onAdd
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-[fade-in_0.2s_ease-out]">
                     <div className="glass w-full max-w-md rounded-2xl p-6 shadow-2xl animate-[slide-up_0.3s_ease-out]">
                         <div className="flex justify-between items-center mb-6">
-                            <h2 className="text-xl font-bold text-foreground">Add Transaction</h2>
+                            <h2 className="text-xl font-bold text-foreground">Tambah Transaksi</h2>
                             <button
                                 onClick={() => toggleOpen(false)}
                                 className="text-muted-foreground hover:text-foreground transition-colors w-8 h-8 flex items-center justify-center rounded-full hover:bg-muted"
@@ -92,53 +93,51 @@ export default function AddExpenseForm({ onAdd, trigger, onOpenChange }: { onAdd
                                 <button
                                     type="button"
                                     disabled={loading}
-                                    onClick={() => setFormData({ ...formData, type: "expense" })}
+                                    onClick={() => setFormData({ ...formData, type: "expense", category: categoriesFor("expense")[0].value })}
                                     className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${formData.type === "expense" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
                                 >
-                                    Expense
+                                    Pengeluaran
                                 </button>
                                 <button
                                     type="button"
                                     disabled={loading}
-                                    onClick={() => setFormData({ ...formData, type: "income" })}
+                                    onClick={() => setFormData({ ...formData, type: "income", category: categoriesFor("income")[0].value })}
                                     className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${formData.type === "income" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
                                 >
-                                    Income
+                                    Pemasukan
                                 </button>
                             </div>
 
                             <div className="flex flex-col gap-1.5">
-                                <label className="text-sm font-medium text-foreground">Amount (Rp)</label>
-                                <input
-                                    type="number"
+                                <label className="text-sm font-medium text-foreground">Jumlah (Rp)</label>
+                                <AmountInput
                                     autoFocus
                                     required
-                                    min="1"
                                     disabled={loading}
-                                    placeholder="50000"
+                                    placeholder="50.000"
                                     value={formData.amount}
-                                    onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                                    onChange={(v) => setFormData({ ...formData, amount: v })}
                                     className="w-full px-4 py-3 rounded-xl bg-background border border-border focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all disabled:opacity-50"
                                 />
                             </div>
 
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="flex flex-col gap-1.5">
-                                    <label className="text-sm font-medium text-foreground">Category</label>
+                                    <label className="text-sm font-medium text-foreground">Kategori</label>
                                     <select
                                         value={formData.category}
                                         disabled={loading}
                                         onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                                         className="w-full px-4 py-3 rounded-xl bg-background border border-border focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all appearance-none disabled:opacity-50"
                                     >
-                                        {CATEGORIES.map((c) => (
+                                        {categoriesFor(formData.type).map((c) => (
                                             <option key={c.value} value={c.value}>{c.value} {c.icon}</option>
                                         ))}
                                     </select>
                                 </div>
 
                                 <div className="flex flex-col gap-1.5">
-                                    <label className="text-sm font-medium text-foreground">Date</label>
+                                    <label className="text-sm font-medium text-foreground">Tanggal</label>
                                     <input
                                         type="date"
                                         required
@@ -151,11 +150,11 @@ export default function AddExpenseForm({ onAdd, trigger, onOpenChange }: { onAdd
                             </div>
 
                             <div className="flex flex-col gap-1.5">
-                                <label className="text-sm font-medium text-foreground">Note (Optional)</label>
+                                <label className="text-sm font-medium text-foreground">Catatan (opsional)</label>
                                 <input
                                     type="text"
                                     disabled={loading}
-                                    placeholder="What was this for?"
+                                    placeholder="Untuk apa?"
                                     value={formData.note}
                                     onChange={(e) => setFormData({ ...formData, note: e.target.value })}
                                     className="w-full px-4 py-3 rounded-xl bg-background border border-border focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all disabled:opacity-50"
@@ -168,7 +167,7 @@ export default function AddExpenseForm({ onAdd, trigger, onOpenChange }: { onAdd
                                 className={`w-full mt-4 font-semibold py-3.5 rounded-xl transition-all active:scale-[0.98] disabled:opacity-70 flex items-center justify-center gap-2 ${formData.type === "expense" ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-success text-success-foreground hover:bg-success/90"}`}
                             >
                                 {loading && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-                                {loading ? "Saving..." : "Save Transaction"}
+                                {loading ? "Menyimpan..." : "Simpan Transaksi"}
                             </button>
                         </form>
                     </div>
