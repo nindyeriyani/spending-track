@@ -26,6 +26,17 @@ export interface Goal extends GoalInput {
     id: string;
 }
 
+// Bentuk dokumen di users/{uid}/budgets/{category}.
+// ID dokumen = nama kategori, jadi satu kategori hanya punya satu budget yang berlaku tiap bulan.
+export interface BudgetInput {
+    category: string;
+    limit: number;
+}
+
+export interface Budget extends BudgetInput {
+    id: string;
+}
+
 export function errorMessage(err: unknown, fallback: string): string {
     return err instanceof Error && err.message ? err.message : fallback;
 }

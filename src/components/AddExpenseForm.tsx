@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { todayLocal } from "@/lib/date";
-import { CATEGORIES } from "@/lib/categories";
+import { EXPENSE_CATEGORIES, categoriesFor } from "@/lib/categories";
 import { errorMessage, type TransactionInput } from "@/lib/types";
 
 export default function AddExpenseForm({ onAdd, trigger, onOpenChange }: { onAdd?: (expense: TransactionInput) => Promise<void> | void, trigger?: React.ReactNode, onOpenChange?: (open: boolean) => void }) {
@@ -20,7 +20,7 @@ export default function AddExpenseForm({ onAdd, trigger, onOpenChange }: { onAdd
     const [formData, setFormData] = useState<Omit<TransactionInput, "amount"> & { amount: string }>({
         type: "expense",
         amount: "",
-        category: "Food",
+        category: EXPENSE_CATEGORIES[0].value,
         date: todayLocal(),
         note: "",
     });
@@ -92,7 +92,7 @@ export default function AddExpenseForm({ onAdd, trigger, onOpenChange }: { onAdd
                                 <button
                                     type="button"
                                     disabled={loading}
-                                    onClick={() => setFormData({ ...formData, type: "expense" })}
+                                    onClick={() => setFormData({ ...formData, type: "expense", category: categoriesFor("expense")[0].value })}
                                     className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${formData.type === "expense" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
                                 >
                                     Expense
@@ -100,7 +100,7 @@ export default function AddExpenseForm({ onAdd, trigger, onOpenChange }: { onAdd
                                 <button
                                     type="button"
                                     disabled={loading}
-                                    onClick={() => setFormData({ ...formData, type: "income" })}
+                                    onClick={() => setFormData({ ...formData, type: "income", category: categoriesFor("income")[0].value })}
                                     className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${formData.type === "income" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
                                 >
                                     Income
@@ -131,7 +131,7 @@ export default function AddExpenseForm({ onAdd, trigger, onOpenChange }: { onAdd
                                         onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                                         className="w-full px-4 py-3 rounded-xl bg-background border border-border focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all appearance-none disabled:opacity-50"
                                     >
-                                        {CATEGORIES.map((c) => (
+                                        {categoriesFor(formData.type).map((c) => (
                                             <option key={c.value} value={c.value}>{c.value} {c.icon}</option>
                                         ))}
                                     </select>

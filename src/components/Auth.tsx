@@ -10,7 +10,25 @@ import {
     getRedirectResult,
     GoogleAuthProvider
 } from "firebase/auth";
-import { errorCode, errorMessage } from "@/lib/types";
+import { errorCode } from "@/lib/types";
+
+// Pesan mentah Firebase ("Firebase: Error (auth/...)") tidak ramah untuk user
+const AUTH_ERROR_MESSAGES: Record<string, string> = {
+    "auth/invalid-credential": "Email atau password salah.",
+    "auth/wrong-password": "Email atau password salah.",
+    "auth/user-not-found": "Email atau password salah.",
+    "auth/invalid-email": "Format email tidak valid.",
+    "auth/email-already-in-use": "Email ini sudah terdaftar. Silakan login.",
+    "auth/weak-password": "Password minimal 6 karakter.",
+    "auth/too-many-requests": "Terlalu banyak percobaan. Coba lagi beberapa saat lagi.",
+    "auth/network-request-failed": "Koneksi bermasalah. Periksa internet Anda.",
+    "auth/user-disabled": "Akun ini telah dinonaktifkan.",
+};
+
+function authErrorMessage(err: unknown, fallback: string): string {
+    const code = errorCode(err);
+    return (code && AUTH_ERROR_MESSAGES[code]) || fallback;
+}
 
 export default function Auth() {
     const [isLogin, setIsLogin] = useState(true);
@@ -20,16 +38,10 @@ export default function Auth() {
     const [loading, setLoading] = useState(false);
     const [redirectProcessing, setRedirectProcessing] = useState(true);
 
-    // Handle redirect result for mobile
+    // Selesaikan login redirect (cadangan kalau popup diblokir)
     useEffect(() => {
-        setRedirectProcessing(true);
         getRedirectResult(auth)
-            .then((result) => {
-                if (result?.user) {
-                    console.log("Redirect sign-in successful:", result.user.email);
-                }
-                setRedirectProcessing(false);
-            })
+            .then(() => setRedirectProcessing(false))
             .catch((err) => {
                 console.error("Redirect Auth Error:", err);
                 if (errorCode(err) !== "auth/no-auth-event") {
@@ -52,7 +64,7 @@ export default function Auth() {
             }
         } catch (err) {
             console.error(err);
-            setError(errorMessage(err, "An error occurred during authentication"));
+            setError(authErrorMessage(err, "Gagal masuk. Silakan coba lagi."));
         } finally {
             setLoading(false);
         }
@@ -63,22 +75,25 @@ export default function Auth() {
         setLoading(true);
         const provider = new GoogleAuthProvider();
 
-        // Detect if mobile to use Redirect instead of Popup
-        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
+        // Popup dipakai juga di HP: browser modern memblokir storage pihak ketiga, sehingga
+        // signInWithRedirect sering kembali ke halaman login tanpa error kalau app tidak
+        // di-host di authDomain Firebase. Redirect hanya cadangan saat popup diblokir.
         try {
-            if (isMobile) {
-                await signInWithRedirect(auth, provider);
-            } else {
-                await signInWithPopup(auth, provider);
-            }
+            await signInWithPopup(auth, provider);
         } catch (err) {
             console.error(err);
-            if (errorCode(err) === "auth/popup-blocked") {
+            const code = errorCode(err);
+            if (code === "auth/popup-blocked") {
                 setError("Popup diblokir. Mencoba metode lain...");
-                await signInWithRedirect(auth, provider);
-            } else {
-                setError(errorMessage(err, "An error occurred during Google login"));
+                try {
+                    await signInWithRedirect(auth, provider);
+                } catch (redirectErr) {
+                    console.error(redirectErr);
+                    setError(authErrorMessage(redirectErr, "Gagal login dengan Google."));
+                }
+            } else if (code !== "auth/popup-closed-by-user" && code !== "auth/cancelled-popup-request") {
+                // Menutup popup sendiri bukan error yang perlu ditampilkan
+                setError(authErrorMessage(err, "Gagal login dengan Google."));
             }
         } finally {
             setLoading(false);
