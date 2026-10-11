@@ -15,11 +15,14 @@ export interface Transaction extends TransactionInput {
     id: string;
 }
 
-// Bentuk dokumen di users/{uid}/goals
+// Bentuk dokumen di users/{uid}/goals.
+// Kalau `category` diisi, target terhubung ke kategori pengeluaran itu: `currentAmount` menjadi saldo awal
+// dan total semua transaksi di kategori tersebut ditambahkan otomatis (lihat src/lib/goals.ts).
 export interface GoalInput {
     name: string;
     targetAmount: number;
     currentAmount: number;
+    category?: string;
 }
 
 export interface Goal extends GoalInput {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import AmountInput from "@/components/AmountInput";
 import { errorMessage, type BudgetInput } from "@/lib/types";
 
 type CategoryOption = { value: string; icon: string };
@@ -57,7 +58,7 @@ export default function AddBudgetForm({ onAdd, categories, trigger, onOpenChange
                     onClick={() => toggleOpen(true)}
                     className="bg-secondary hover:bg-secondary/80 text-secondary-foreground px-5 py-2.5 rounded-full font-medium transition-all active:scale-95 border border-border"
                 >
-                    + New Budget
+                    + Budget Baru
                 </button>
             )}
 
@@ -65,7 +66,7 @@ export default function AddBudgetForm({ onAdd, categories, trigger, onOpenChange
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-[fade-in_0.2s_ease-out]">
                     <div className="glass w-full max-w-md rounded-2xl p-6 shadow-2xl animate-[slide-up_0.3s_ease-out]">
                         <div className="flex justify-between items-center mb-6">
-                            <h2 className="text-xl font-bold text-foreground">Add Monthly Budget</h2>
+                            <h2 className="text-xl font-bold text-foreground">Tambah Budget Bulanan</h2>
                             <button
                                 onClick={() => toggleOpen(false)}
                                 className="text-muted-foreground hover:text-foreground transition-colors w-8 h-8 flex items-center justify-center rounded-full hover:bg-muted"
@@ -82,7 +83,7 @@ export default function AddBudgetForm({ onAdd, categories, trigger, onOpenChange
 
                         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
                             <div className="flex flex-col gap-1.5">
-                                <label className="text-sm font-medium text-foreground">Category</label>
+                                <label className="text-sm font-medium text-foreground">Kategori</label>
                                 <select
                                     required
                                     disabled={loading}
@@ -97,16 +98,14 @@ export default function AddBudgetForm({ onAdd, categories, trigger, onOpenChange
                             </div>
 
                             <div className="flex flex-col gap-1.5">
-                                <label className="text-sm font-medium text-foreground">Monthly Limit (Rp)</label>
-                                <input
-                                    type="number"
+                                <label className="text-sm font-medium text-foreground">Batas per Bulan (Rp)</label>
+                                <AmountInput
                                     required
-                                    min="1"
                                     autoFocus
                                     disabled={loading}
-                                    placeholder="2000000"
+                                    placeholder="2.000.000"
                                     value={formData.limit}
-                                    onChange={(e) => setFormData({ ...formData, limit: e.target.value })}
+                                    onChange={(v) => setFormData({ ...formData, limit: v })}
                                     className="w-full px-4 py-3 rounded-xl bg-background border border-border focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all disabled:opacity-50"
                                 />
                                 <p className="text-xs text-muted-foreground">Berlaku setiap bulan sampai diubah.</p>
@@ -118,7 +117,7 @@ export default function AddBudgetForm({ onAdd, categories, trigger, onOpenChange
                                 className="w-full mt-4 font-semibold py-3.5 rounded-xl transition-all active:scale-[0.98] bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-70 flex items-center justify-center gap-2"
                             >
                                 {loading && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-                                {loading ? "Saving..." : "Save Budget"}
+                                {loading ? "Menyimpan..." : "Simpan Budget"}
                             </button>
                         </form>
                     </div>

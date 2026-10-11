@@ -3,12 +3,19 @@ import type { Transaction } from "./types";
 // Mulai dari persentase ini budget dianggap hampir habis
 export const BUDGET_WARNING_RATIO = 0.8;
 
-export type BudgetStatus = "safe" | "warning" | "over";
+// Budget pengeluaran: aman / hampir habis / terlampaui.
+// Budget tabungan dibaca terbalik: mencapai batas itu baik, jadi statusnya menabung / tercapai.
+export type BudgetStatus = "safe" | "warning" | "over" | "saving" | "saved";
 
-export function budgetStatus(spent: number, limit: number): BudgetStatus {
+export function budgetStatus(spent: number, limit: number, isSavings = false): BudgetStatus {
+    if (isSavings) return spent >= limit ? "saved" : "saving";
     if (spent > limit) return "over";
     if (spent >= limit * BUDGET_WARNING_RATIO) return "warning";
     return "safe";
+}
+
+export function needsAttention(status: BudgetStatus): boolean {
+    return status === "warning" || status === "over";
 }
 
 // Total pengeluaran per kategori dari daftar transaksi (pemasukan diabaikan)

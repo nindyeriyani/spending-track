@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Spending Track | Finance Overview",
-  description: "Premium Minimalist Spending Tracker",
+  title: "Spending Track",
+  description: "Catatan pemasukan, pengeluaran, budget, dan target keuangan",
   icons: {
     icon: "/favicon.png",
   },
@@ -26,7 +26,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="id">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
         suppressHydrationWarning

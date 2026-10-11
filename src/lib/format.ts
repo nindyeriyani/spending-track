@@ -3,6 +3,7 @@ export function formatNumber(n: number): string {
     return n.toLocaleString("id-ID");
 }
 
+// Tanda minus di depan "Rp" ("-Rp 5.000"), bukan "Rp -5.000"
 export function formatRupiah(n: number): string {
-    return `Rp ${formatNumber(n)}`;
+    return `${n < 0 ? "-" : ""}Rp ${formatNumber(Math.abs(n))}`;
 }

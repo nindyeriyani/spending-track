@@ -19,12 +19,14 @@ service cloud.firestore {
         && data.note is string && data.note.size() <= 500;
     }
 
+    // `category` opsional: kategori pengeluaran yang terhubung ke target
     function isValidGoal(data) {
-      return data.keys().hasOnly(['name', 'targetAmount', 'currentAmount'])
+      return data.keys().hasOnly(['name', 'targetAmount', 'currentAmount', 'category'])
         && data.keys().hasAll(['name', 'targetAmount', 'currentAmount'])
         && data.name is string && data.name.size() > 0 && data.name.size() <= 100
         && data.targetAmount is number && data.targetAmount > 0
-        && data.currentAmount is number && data.currentAmount >= 0;
+        && data.currentAmount is number && data.currentAmount >= 0
+        && (!('category' in data) || data.category in budgetCategories().values());
     }
 
     // ID dokumen -> nama kategori, harus sama dengan EXPENSE_CATEGORIES di src/lib/categories.ts

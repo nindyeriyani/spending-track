@@ -5,11 +5,13 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import AddExpenseForm from "@/components/AddExpenseForm";
 import AddGoalForm from "@/components/AddGoalForm";
 import AddBudgetForm from "@/components/AddBudgetForm";
+import AmountInput from "@/components/AmountInput";
 import Auth from "@/components/Auth";
 import { auth, db } from "@/lib/firebase";
 import { monthKey, parseLocalDate } from "@/lib/date";
-import { BUDGET_CATEGORIES, budgetKey, categoriesFor, categoryIcon } from "@/lib/categories";
-import { BUDGET_WARNING_RATIO, budgetStatus, daysLeftInMonth, spentByCategory, type BudgetStatus } from "@/lib/budget";
+import { BUDGET_CATEGORIES, EXPENSE_CATEGORIES, budgetKey, categoriesFor, categoryIcon, isSavingsCategory } from "@/lib/categories";
+import { goalSaved, isGoalReached } from "@/lib/goals";
+import { BUDGET_WARNING_RATIO, budgetStatus, daysLeftInMonth, needsAttention, spentByCategory, type BudgetStatus } from "@/lib/budget";
 import { exportMonthToExcel } from "@/lib/exportExcel";
 import { formatNumber, formatRupiah } from "@/lib/format";
 import type { Budget, BudgetInput, Goal, GoalInput, Transaction, TransactionInput } from "@/lib/types";
@@ -31,17 +33,20 @@ type Tab = "overview" | "budget" | "goals";
 // Jumlah transaksi yang tampil di Home sebelum tombol "Lihat semua"
 const ACTIVITY_PREVIEW_COUNT = 10;
 
-const TAB_TITLES: Record<Tab, string> = { overview: "Finance Overview", budget: "Monthly Budget", goals: "Goals" };
+const TAB_TITLES: Record<Tab, string> = { overview: "Ringkasan Keuangan", budget: "Budget Bulanan", goals: "Target" };
 
 const STATUS_STYLES: Record<BudgetStatus, { bar: string; badge: string; label: string }> = {
   safe: { bar: "bg-success", badge: "bg-success/10 text-success", label: "Aman" },
   warning: { bar: "bg-warning", badge: "bg-warning/15 text-warning", label: "Hampir habis" },
   over: { bar: "bg-destructive", badge: "bg-destructive/10 text-destructive", label: "Terlampaui" },
+  saving: { bar: "bg-primary", badge: "bg-primary/10 text-primary", label: "Menabung" },
+  saved: { bar: "bg-success", badge: "bg-success/10 text-success", label: "Tercapai ✓" },
 };
 
 // Angka di form edit disimpan sebagai string supaya field bisa dikosongkan saat mengetik
 type EditableTransaction = Omit<Transaction, "amount"> & { amount: string };
-type EditableGoal = Omit<Goal, "targetAmount" | "currentAmount"> & { targetAmount: string; currentAmount: string };
+// `category` "" berarti target tidak dihubungkan ke kategori
+type EditableGoal = Omit<Goal, "targetAmount" | "currentAmount" | "category"> & { targetAmount: string; currentAmount: string; category: string };
 type EditableBudget = Omit<Budget, "limit"> & { limit: string };
 
 export default function Home() {
@@ -208,14 +213,17 @@ export default function Home() {
     return recentTransactions.filter((tx) => typeof tx.date === "string" && tx.date.startsWith(key));
   }, [recentTransactions, currentMonth]);
 
-  const { totalIncome, totalExpense, balance } = useMemo(() => {
+  // Tabungan dicatat sebagai pengeluaran tapi dipisah supaya terlihat berapa yang benar-benar dibelanjakan
+  const { totalIncome, totalExpense, totalSavings, balance } = useMemo(() => {
     let income = 0;
     let expense = 0;
+    let savings = 0;
     filteredTransactions.forEach((tx) => {
       if (tx.type === "income") income += tx.amount;
+      else if (isSavingsCategory(tx.category)) savings += tx.amount;
       else expense += tx.amount;
     });
-    return { totalIncome: income, totalExpense: expense, balance: income - expense };
+    return { totalIncome: income, totalExpense: expense, totalSavings: savings, balance: income - expense - savings };
   }, [filteredTransactions]);
 
   // Budget bulan berjalan: limit berlaku tiap bulan, pemakaian dihitung dari transaksi bulan ini
@@ -226,14 +234,19 @@ export default function Home() {
     return budgets
       .map((b) => {
         const spent = spentThisMonth.get(b.category) ?? 0;
-        return { ...b, spent, status: budgetStatus(spent, b.limit) };
+        const isSavings = isSavingsCategory(b.category);
+        return { ...b, spent, isSavings, status: budgetStatus(spent, b.limit, isSavings) };
       })
       .sort((a, b) => order(a.category) - order(b.category));
   }, [budgets, spentThisMonth]);
 
+  const spendingBudgetRows = useMemo(() => budgetRows.filter((b) => !b.isSavings), [budgetRows]);
+  const savingsBudgetRows = useMemo(() => budgetRows.filter((b) => b.isSavings), [budgetRows]);
+
+  // Sisa budget dan saran harian hanya dari budget pengeluaran; tabungan tidak dibelanjakan harian
   const budgetSummary = useMemo(() => {
-    const totalLimit = budgetRows.reduce((sum, b) => sum + b.limit, 0);
-    const totalSpent = budgetRows.reduce((sum, b) => sum + b.spent, 0);
+    const totalLimit = spendingBudgetRows.reduce((sum, b) => sum + b.limit, 0);
+    const totalSpent = spendingBudgetRows.reduce((sum, b) => sum + b.spent, 0);
     const remaining = totalLimit - totalSpent;
     // Saran harian hanya bermakna untuk bulan berjalan
     const daysLeft = isCurrentMonth ? daysLeftInMonth(today) : 0;
@@ -243,9 +256,11 @@ export default function Home() {
       remaining,
       daysLeft,
       dailyAllowance: daysLeft > 0 && remaining > 0 ? Math.floor(remaining / daysLeft) : 0,
-      alertCount: budgetRows.filter((b) => b.status !== "safe").length,
+      alertCount: spendingBudgetRows.filter((b) => needsAttention(b.status)).length,
+      savingsPlanned: savingsBudgetRows.reduce((sum, b) => sum + b.limit, 0),
+      savingsDone: savingsBudgetRows.reduce((sum, b) => sum + b.spent, 0),
     };
-  }, [budgetRows, isCurrentMonth, today]);
+  }, [spendingBudgetRows, savingsBudgetRows, isCurrentMonth, today]);
 
   // Kategori yang ada pengeluarannya bulan ini tapi belum diberi budget
   const unbudgetedSpending = useMemo(() => {
@@ -255,13 +270,29 @@ export default function Home() {
       .sort((a, b) => b[1] - a[1]);
   }, [budgets, spentThisMonth]);
 
+  // Progres target yang terhubung ke kategori dihitung dari semua transaksi, bukan hanya bulan yang dilihat
+  const spentAllTime = useMemo(() => spentByCategory(recentTransactions), [recentTransactions]);
+
+  const goalRows = useMemo(
+    () => goals.map((g) => {
+      const saved = goalSaved(g, spentAllTime);
+      const progress = g.targetAmount > 0 ? Math.min(Math.max((saved / g.targetAmount) * 100, 0), 100) : 0;
+      return { ...g, saved, progress, reached: isGoalReached(saved, g.targetAmount) };
+    }),
+    [goals, spentAllTime]
+  );
+
+  // Satu kategori hanya boleh terhubung ke satu target supaya uangnya tidak terhitung dua kali
+  const goalCategoriesFor = (exceptGoalId?: string) =>
+    EXPENSE_CATEGORIES.filter((c) => !goals.some((g) => g.id !== exceptGoalId && g.category === c.value));
+
   const availableBudgetCategories = useMemo(
     () => BUDGET_CATEGORIES.filter((c) => !budgets.some((b) => b.category === c.value)),
     [budgets]
   );
 
   const handleLogout = async () => {
-    showConfirm("Are you sure you want to sign out?", async () => {
+    showConfirm("Yakin ingin keluar dari akun?", async () => {
       closeAlert();
       try {
         await signOut(auth);
@@ -269,7 +300,7 @@ export default function Home() {
         console.error("Sign out failed:", e);
         showAlert("Gagal keluar.", "error");
       }
-    }, "Sign Out");
+    }, "Keluar");
   };
 
   const formattedMonth = currentMonth.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
@@ -307,11 +338,24 @@ export default function Home() {
         .reduce((sum, tx) => sum + tx.amount, 0);
       const after = before + expense.amount;
       const when = expenseMonth === monthKey(today) ? "bulan ini" : `di ${expenseMonthLabel}`;
-      if (after > budget.limit) {
+      if (isSavingsCategory(expense.category)) {
+        // Untuk tabungan, mencapai budget justru kabar baik
+        if (before < budget.limit && after >= budget.limit) {
+          notes.push(`Tabungan ${expense.category} ${when} sudah sesuai rencana ✓`);
+        }
+      } else if (after > budget.limit) {
         notes.push(`Budget ${expense.category} ${when} terlampaui ${formatRupiah(after - budget.limit)}.`);
         isError = true;
       } else if (before < budget.limit * BUDGET_WARNING_RATIO && after >= budget.limit * BUDGET_WARNING_RATIO) {
         notes.push(`Budget ${expense.category} ${when} sudah terpakai ${Math.round((after / budget.limit) * 100)}%. Sisa ${formatRupiah(budget.limit - after)}.`);
+      }
+    }
+    // Rayakan kalau transaksi ini membuat target yang terhubung tercapai
+    const linkedGoal = expense.type === "expense" ? goals.find((g) => g.category === expense.category) : undefined;
+    if (linkedGoal) {
+      const before = goalSaved(linkedGoal, spentAllTime);
+      if (!isGoalReached(before, linkedGoal.targetAmount) && isGoalReached(before + expense.amount, linkedGoal.targetAmount)) {
+        notes.unshift(`🎉 Selamat! Target "${linkedGoal.name}" tercapai (${formatRupiah(linkedGoal.targetAmount)}).`);
       }
     }
     if (!navigator.onLine) notes.push("Sedang offline: tersimpan di perangkat dan akan disinkronkan saat online.");
@@ -352,15 +396,26 @@ export default function Home() {
       showAlert("Jumlah harus lebih dari 0.", "error");
       return;
     }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(editingTransaction.date)) {
+      showAlert("Tanggal tidak valid.", "error");
+      return;
+    }
     commit(updateDoc(doc(db, "users", user.uid, "transactions", editingTransaction.id), {
       type: editingTransaction.type,
       category: editingTransaction.category,
+      date: editingTransaction.date,
       note: editingTransaction.note,
       amount
     }), "Gagal memperbarui transaksi.");
     setEditingTransaction(null);
     setExpandedActivityId(null);
-    showAlert("Transaksi berhasil diperbarui.");
+    // Transaksi yang dipindah ke bulan lain akan hilang dari daftar, jadi beri tahu ke mana pindahnya
+    if (!editingTransaction.date.startsWith(monthKey(currentMonth))) {
+      const month = parseLocalDate(editingTransaction.date).toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+      showAlert(`Transaksi berhasil diperbarui dan dipindah ke ${month}.`);
+    } else {
+      showAlert("Transaksi berhasil diperbarui.");
+    }
   };
 
   const handleSaveGoal = (e: React.FormEvent) => {
@@ -382,13 +437,22 @@ export default function Home() {
       showAlert("Jumlah terkumpul tidak boleh negatif.", "error");
       return;
     }
-    commit(updateDoc(doc(db, "users", user.uid, "goals", editingGoal.id), {
+    // setDoc (bukan updateDoc) supaya `category` ikut terhapus saat hubungan kategori dilepas
+    const updated: GoalInput = {
       name,
       currentAmount,
-      targetAmount
-    }), "Gagal memperbarui target.");
+      targetAmount,
+      ...(editingGoal.category ? { category: editingGoal.category } : {}),
+    };
+    commit(setDoc(doc(db, "users", user.uid, "goals", editingGoal.id), updated), "Gagal memperbarui target.");
+    const previous = goalRows.find((g) => g.id === editingGoal.id);
+    const savedNow = goalSaved(updated, spentAllTime);
     setEditingGoal(null);
-    showAlert("Target berhasil diperbarui.");
+    if (previous && !previous.reached && isGoalReached(savedNow, targetAmount)) {
+      showAlert(`🎉 Selamat! Target "${name}" tercapai (${formatRupiah(targetAmount)}).`);
+    } else {
+      showAlert("Target berhasil diperbarui.");
+    }
   };
 
   if (!mounted || authLoading) {
@@ -396,13 +460,65 @@ export default function Home() {
       <div className="min-h-screen flex items-center justify-center bg-[#f0f4f8]">
         <div className="flex flex-col items-center gap-4">
           <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-          <p className="text-muted-foreground font-medium animate-pulse">Initializing...</p>
+          <p className="text-muted-foreground font-medium animate-pulse">Memuat...</p>
         </div>
       </div>
     );
   }
 
   if (!user) return <Auth />;
+
+  const renderBudgetCard = (b: (typeof budgetRows)[number]) => {
+    const style = STATUS_STYLES[b.status];
+    const usage = (b.spent / b.limit) * 100;
+    const remaining = b.limit - b.spent;
+    return (
+      <div
+        key={b.id}
+        onClick={() => setEditingBudget({ id: b.id, category: b.category, limit: String(b.limit) })}
+        className="premium-card p-6 flex flex-col gap-4 group relative cursor-pointer hover:border-primary/30 transition-all active:scale-[0.98]"
+      >
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            showConfirm(`Hapus budget "${b.category}"?`, () => {
+              commit(deleteDoc(doc(db, "users", user.uid, "budgets", b.id)), "Gagal menghapus budget.");
+              showAlert("Budget berhasil dihapus.");
+            });
+          }}
+          aria-label={`Hapus budget ${b.category}`}
+          className="absolute top-4 right-4 w-8 h-8 rounded-full bg-muted/50 flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-all pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 focus-visible:opacity-100 z-10"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+        <div className="flex items-center gap-3 pr-10">
+          <div className="w-10 h-10 rounded-xl bg-primary/5 flex items-center justify-center text-lg shrink-0">{categoryIcon(b.category)}</div>
+          <div className="flex-1 flex flex-col min-w-0">
+            <h4 className="font-bold truncate">{b.category}</h4>
+            <span className="text-[10px] font-bold opacity-50 uppercase">
+              {formatRupiah(b.spent)} / {formatRupiah(b.limit)}
+            </span>
+          </div>
+          <span className={`text-xs font-black px-2 py-1 rounded-full shrink-0 ${style.badge}`}>{Math.round(usage)}%</span>
+        </div>
+        <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+          <div className={`h-full transition-all duration-700 ${style.bar}`} style={{ width: `${Math.min(usage, 100)}%` }} />
+        </div>
+        <div className="flex justify-between text-[10px] font-bold uppercase">
+          <span className="opacity-50">{style.label}</span>
+          {b.isSavings ? (
+            <span className={remaining <= 0 ? "text-success" : "opacity-50"}>
+              {remaining > 0 ? `Kurang ${formatRupiah(remaining)}` : remaining === 0 ? "Sesuai rencana" : `Lebih ${formatRupiah(-remaining)}`}
+            </span>
+          ) : (
+            <span className={remaining < 0 ? "text-destructive" : "opacity-50"}>
+              {remaining >= 0 ? `Sisa ${formatRupiah(remaining)}` : `Lewat ${formatRupiah(-remaining)}`}
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col items-center">
@@ -441,22 +557,23 @@ export default function Home() {
               )}
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <div
-              onClick={handleLogout}
-              className="w-10 h-10 rounded-full border-2 border-primary/20 p-0.5 overflow-hidden ring-2 ring-primary/5 cursor-pointer hover:ring-primary/40 transition-all active:scale-95"
-            >
-              {user.photoURL ? (
-                // Foto profil Google dari domain eksternal; next/image butuh remotePatterns dan tidak sepadan untuk avatar 40px
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={user.photoURL} className="w-full h-full object-cover rounded-full" alt="Profile" />
-              ) : (
-                <div className="w-full h-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs uppercase">
-                  {user.email?.[0]}
-                </div>
-              )}
-            </div>
-          </div>
+          <button
+            type="button"
+            onClick={handleLogout}
+            aria-label={`Keluar dari akun ${user.email ?? ""}`}
+            title="Keluar"
+            className="relative w-10 h-10 rounded-full border-2 border-primary/20 p-0.5 ring-2 ring-primary/5 hover:ring-primary/40 transition-all active:scale-95"
+          >
+            {user.photoURL ? (
+              // Foto profil Google dari domain eksternal; next/image butuh remotePatterns dan tidak sepadan untuk avatar 40px
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={user.photoURL} className="w-full h-full object-cover rounded-full" alt="" />
+            ) : (
+              <span className="w-full h-full rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs uppercase">
+                {user.email?.[0]}
+              </span>
+            )}
+          </button>
         </header>
 
         {activeTab === "overview" && (
@@ -465,20 +582,24 @@ export default function Home() {
             <div className="gradient-card p-8 flex flex-col gap-8 relative overflow-hidden">
               <div className="absolute top-[-20%] right-[-10%] w-40 h-40 bg-white/10 rounded-full blur-3xl" />
               <div className="flex flex-col gap-1">
-                <p className="text-white/70 text-sm font-medium uppercase tracking-wider">Total Balance</p>
+                <p className="text-white/70 text-sm font-medium uppercase tracking-wider">Saldo</p>
                 <h2 className="text-4xl font-bold tracking-tight">
-                  {new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR" }).format(balance)}
+                  {formatRupiah(balance)}
                 </h2>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 border-t border-white/10 pt-6">
-                <div className="flex flex-col gap-1">
-                  <p className="text-white/50 text-[10px] font-bold uppercase">Income</p>
-                  <p className="text-sm font-bold truncate">{formatRupiah(totalIncome)}</p>
+              <div className="grid grid-cols-3 gap-4 border-t border-white/10 pt-6">
+                <div className="flex flex-col gap-1 min-w-0">
+                  <p className="text-white/50 text-[10px] font-bold uppercase">Pemasukan</p>
+                  <p className="text-sm font-bold truncate">{formatNumber(totalIncome)}</p>
                 </div>
-                <div className="flex flex-col gap-1">
-                  <p className="text-white/50 text-[10px] font-bold uppercase">Spending</p>
-                  <p className="text-sm font-bold truncate">{formatRupiah(totalExpense)}</p>
+                <div className="flex flex-col gap-1 min-w-0">
+                  <p className="text-white/50 text-[10px] font-bold uppercase">Pengeluaran</p>
+                  <p className="text-sm font-bold truncate">{formatNumber(totalExpense)}</p>
+                </div>
+                <div className="flex flex-col gap-1 min-w-0">
+                  <p className="text-white/50 text-[10px] font-bold uppercase">Tabungan</p>
+                  <p className="text-sm font-bold truncate">{formatNumber(totalSavings)}</p>
                 </div>
               </div>
             </div>
@@ -507,19 +628,20 @@ export default function Home() {
                     <div className="w-12 h-12 rounded-full bg-primary/5 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-colors">
                       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
                     </div>
-                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Add Expense</span>
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Tambah Transaksi</span>
                   </div>
                 }
               />
               <AddGoalForm
                 onAdd={handleAddGoal}
+                categories={goalCategoriesFor()}
                 onOpenChange={setIsAdding}
                 trigger={
                   <div className="action-tile p-6 flex flex-col items-center justify-center gap-3 cursor-pointer group">
                     <div className="w-12 h-12 rounded-full bg-primary/5 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-colors">
                       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" /></svg>
                     </div>
-                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">New Goal</span>
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Target Baru</span>
                   </div>
                 }
               />
@@ -529,18 +651,18 @@ export default function Home() {
             <div className="flex flex-col gap-4">
               <div className="flex justify-between items-center px-1">
                 <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-widest">
-                  Activity <span className="opacity-60">({filteredTransactions.length})</span>
+                  Aktivitas <span className="opacity-60">({filteredTransactions.length})</span>
                 </h3>
                 <button onClick={handleExportExcel} disabled={exporting} className="text-xs font-bold text-primary hover:underline italic flex items-center gap-1.5 px-3 py-1 bg-primary/5 rounded-lg border border-primary/10 transition-colors">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
-                  {exporting ? "Exporting..." : "Export Excel"}
+                  {exporting ? "Mengunduh..." : "Unduh Excel"}
                 </button>
               </div>
 
               <div className="flex flex-col gap-4 relative min-h-[100px]">
                 {dataLoading && <div className="absolute inset-0 bg-background/50 flex items-center justify-center z-10"><div className="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin" /></div>}
                 {filteredTransactions.length === 0 ? (
-                  <div className="text-center py-12 opacity-40 font-medium italic premium-card">No activity this month</div>
+                  <div className="text-center py-12 opacity-40 font-medium italic premium-card">Belum ada transaksi di bulan ini</div>
                 ) : (
                   (showAllActivity ? filteredTransactions : filteredTransactions.slice(0, ACTIVITY_PREVIEW_COUNT)).map((tx) => {
                     const isExpanded = expandedActivityId === tx.id;
@@ -556,7 +678,7 @@ export default function Home() {
                           </div>
                           <div className="flex-1 flex flex-col min-w-0">
                             <span className="font-bold text-sm tracking-tight truncate">{tx.category}</span>
-                            <span className="text-[10px] font-bold opacity-40 uppercase truncate">{tx.note || "General"}</span>
+                            <span className="text-[10px] font-bold opacity-40 uppercase truncate">{tx.note || "Tanpa catatan"}</span>
                           </div>
                           <div className="flex flex-col items-end shrink-0">
                             <span className={`font-black text-sm tracking-tighter ${tx.type === "income" ? "text-success" : "text-destructive"}`}>
@@ -644,6 +766,11 @@ export default function Home() {
                   {budgetSummary.daysLeft} hari tersisa bulan ini
                 </p>
               )}
+              {budgetSummary.savingsPlanned > 0 && (
+                <p className="text-white/80 text-xs font-bold bg-white/10 rounded-2xl px-4 py-3 -mt-2">
+                  🏦 Tabungan: {formatRupiah(budgetSummary.savingsDone)} dari rencana {formatRupiah(budgetSummary.savingsPlanned)}
+                </p>
+              )}
             </div>
 
             {/* Budget per Category */}
@@ -657,7 +784,7 @@ export default function Home() {
                     onOpenChange={setIsAdding}
                     trigger={
                       <button className="text-xs font-bold text-primary hover:text-primary/80 transition-colors flex items-center gap-1.5 bg-primary/5 px-3 py-1.5 rounded-full border border-primary/10">
-                        <span className="text-sm">+</span> Add Budget
+                        <span className="text-sm">+</span> Tambah Budget
                       </button>
                     }
                   />
@@ -667,53 +794,15 @@ export default function Home() {
               <div className="flex flex-col gap-4 relative min-h-[100px]">
                 {budgetsLoading && <div className="absolute inset-0 bg-background/50 flex items-center justify-center z-10"><div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>}
                 {budgetRows.length === 0 ? (
-                  <div className="text-center py-12 opacity-40 font-medium italic premium-card">No budgets set yet</div>
+                  <div className="text-center py-12 opacity-40 font-medium italic premium-card">Belum ada budget. Tambahkan budget per kategori.</div>
                 ) : (
-                  budgetRows.map((b) => {
-                    const style = STATUS_STYLES[b.status];
-                    const usage = (b.spent / b.limit) * 100;
-                    const remaining = b.limit - b.spent;
-                    return (
-                      <div
-                        key={b.id}
-                        onClick={() => setEditingBudget({ id: b.id, category: b.category, limit: String(b.limit) })}
-                        className="premium-card p-6 flex flex-col gap-4 group relative cursor-pointer hover:border-primary/30 transition-all active:scale-[0.98]"
-                      >
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            showConfirm(`Hapus budget "${b.category}"?`, () => {
-                              commit(deleteDoc(doc(db, "users", user.uid, "budgets", b.id)), "Gagal menghapus budget.");
-                              showAlert("Budget berhasil dihapus.");
-                            });
-                          }}
-                          aria-label={`Hapus budget ${b.category}`}
-                          className="absolute top-4 right-4 w-8 h-8 rounded-full bg-muted/50 flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-all pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 focus-visible:opacity-100 z-10"
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                        </button>
-                        <div className="flex items-center gap-3 pr-10">
-                          <div className="w-10 h-10 rounded-xl bg-primary/5 flex items-center justify-center text-lg shrink-0">{categoryIcon(b.category)}</div>
-                          <div className="flex-1 flex flex-col min-w-0">
-                            <h4 className="font-bold truncate">{b.category}</h4>
-                            <span className="text-[10px] font-bold opacity-50 uppercase">
-                              {formatRupiah(b.spent)} / {formatRupiah(b.limit)}
-                            </span>
-                          </div>
-                          <span className={`text-xs font-black px-2 py-1 rounded-full shrink-0 ${style.badge}`}>{Math.round(usage)}%</span>
-                        </div>
-                        <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-                          <div className={`h-full transition-all duration-700 ${style.bar}`} style={{ width: `${Math.min(usage, 100)}%` }} />
-                        </div>
-                        <div className="flex justify-between text-[10px] font-bold uppercase">
-                          <span className="opacity-50">{style.label}</span>
-                          <span className={remaining < 0 ? "text-destructive" : "opacity-50"}>
-                            {remaining >= 0 ? `Sisa ${formatRupiah(remaining)}` : `Lewat ${formatRupiah(-remaining)}`}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })
+                  <>
+                    {spendingBudgetRows.map(renderBudgetCard)}
+                    {savingsBudgetRows.length > 0 && (
+                      <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-widest px-1 mt-2">🏦 Tabungan</h4>
+                    )}
+                    {savingsBudgetRows.map(renderBudgetCard)}
+                  </>
                 )}
               </div>
             </div>
@@ -741,13 +830,14 @@ export default function Home() {
             {/* Goals Section */}
             <div className="flex flex-col gap-4">
               <div className="flex justify-between items-center px-1">
-                <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Savings Progress</h3>
+                <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Progres Tabungan</h3>
                 <AddGoalForm
                   onAdd={handleAddGoal}
+                  categories={goalCategoriesFor()}
                   onOpenChange={setIsAdding}
                   trigger={
                     <button className="text-xs font-bold text-primary hover:text-primary/80 transition-colors flex items-center gap-1.5 bg-primary/5 px-3 py-1.5 rounded-full border border-primary/10">
-                      <span className="text-sm">+</span> Add Goal
+                      <span className="text-sm">+</span> Tambah Target
                     </button>
                   }
                 />
@@ -755,15 +845,15 @@ export default function Home() {
 
               <div className="flex flex-col gap-4 relative min-h-[100px]">
                 {goalsLoading && <div className="absolute inset-0 bg-background/50 flex items-center justify-center z-10"><div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>}
-                {goals.length === 0 ? (
-                  <div className="text-center py-12 opacity-40 font-medium italic premium-card">No goals set yet</div>
+                {goalRows.length === 0 ? (
+                  <div className="text-center py-12 opacity-40 font-medium italic premium-card">Belum ada target</div>
                 ) : (
-                  goals.map(goal => {
-                    const progress = goal.targetAmount > 0 ? Math.min(Math.max((goal.currentAmount / goal.targetAmount) * 100, 0), 100) : 0;
+                  goalRows.map(goal => {
+                    const { progress } = goal;
                     return (
                       <div
                         key={goal.id}
-                        onClick={() => setEditingGoal({ ...goal, targetAmount: String(goal.targetAmount), currentAmount: String(goal.currentAmount) })}
+                        onClick={() => setEditingGoal({ id: goal.id, name: goal.name, targetAmount: String(goal.targetAmount), currentAmount: String(goal.currentAmount), category: goal.category ?? "" })}
                         className="premium-card p-6 flex flex-col gap-4 group relative cursor-pointer hover:border-primary/30 transition-all active:scale-[0.98]"
                       >
                         <button
@@ -782,16 +872,27 @@ export default function Home() {
                         </button>
                         <div className="flex justify-between items-center">
                           <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-primary/5 flex items-center justify-center text-lg">🎯</div>
-                            <h4 className="font-bold truncate max-w-[150px]">{goal.name}</h4>
+                            <div className="w-10 h-10 rounded-xl bg-primary/5 flex items-center justify-center text-lg shrink-0">
+                              {goal.category ? categoryIcon(goal.category) : "🎯"}
+                            </div>
+                            <div className="flex flex-col min-w-0">
+                              <h4 className="font-bold truncate max-w-[150px]">{goal.name}</h4>
+                              {goal.category && (
+                                <span className="text-[10px] font-bold text-muted-foreground truncate max-w-[170px]">Otomatis dari kategori {goal.category}</span>
+                              )}
+                            </div>
                           </div>
-                          <span className="text-xs font-black text-primary bg-primary/10 px-2 py-1 rounded-full">{Math.round(progress)}%</span>
+                          {goal.reached ? (
+                            <span className="text-xs font-black text-success bg-success/10 px-2 py-1 rounded-full shrink-0 mr-8 pointer-fine:mr-0">✓ Tercapai</span>
+                          ) : (
+                            <span className="text-xs font-black text-primary bg-primary/10 px-2 py-1 rounded-full shrink-0 mr-8 pointer-fine:mr-0">{Math.round(progress)}%</span>
+                          )}
                         </div>
                         <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-                          <div className="h-full bg-primary transition-all duration-700" style={{ width: `${progress}%` }} />
+                          <div className={`h-full transition-all duration-700 ${goal.reached ? "bg-success" : "bg-primary"}`} style={{ width: `${progress}%` }} />
                         </div>
                         <div className="flex justify-between text-[10px] font-bold opacity-50 uppercase">
-                          <span>Saved: {formatRupiah(goal.currentAmount)}</span>
+                          <span>Terkumpul: {formatRupiah(goal.saved)}</span>
                           <span>Target: {formatRupiah(goal.targetAmount)}</span>
                         </div>
                       </div>
@@ -806,18 +907,18 @@ export default function Home() {
         {/* Floating Bottom Nav */}
         {!isAdding && !editingGoal && !editingTransaction && !editingBudget && (
           <nav className="fixed bottom-8 left-1/2 -translate-x-1/2 w-[75%] max-w-sm glass rounded-[2.5rem] p-2 flex justify-center items-center shadow-2xl shadow-primary/20 z-50 border border-white/40 gap-2 animate-[slide-up_0.3s_ease-out]">
-            <button onClick={() => setActiveTab("overview")} aria-label="Home" className={`flex items-center justify-center gap-2 flex-1 py-4 px-2 rounded-full transition-all duration-300 ${activeTab === "overview" ? "bg-primary text-white shadow-xl shadow-primary/30" : "text-muted-foreground hover:bg-muted"}`}>
+            <button onClick={() => setActiveTab("overview")} aria-label="Beranda" className={`flex items-center justify-center gap-2 flex-1 py-4 px-2 rounded-full transition-all duration-300 ${activeTab === "overview" ? "bg-primary text-white shadow-xl shadow-primary/30" : "text-muted-foreground hover:bg-muted"}`}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /></svg>
-              {activeTab === "overview" && <span className="text-xs font-black uppercase tracking-widest ml-1">Home</span>}
+              {activeTab === "overview" && <span className="text-xs font-black uppercase tracking-widest ml-1">Beranda</span>}
             </button>
             <button onClick={() => setActiveTab("budget")} aria-label="Budget" className={`relative flex items-center justify-center gap-2 flex-1 py-4 px-2 rounded-full transition-all duration-300 ${activeTab === "budget" ? "bg-primary text-white shadow-xl shadow-primary/30" : "text-muted-foreground hover:bg-muted"}`}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="2" y="5" width="20" height="14" rx="2" /><line x1="2" y1="10" x2="22" y2="10" /></svg>
               {activeTab === "budget" && <span className="text-xs font-black uppercase tracking-widest ml-1">Budget</span>}
               {activeTab !== "budget" && budgetSummary.alertCount > 0 && <span className="absolute top-3 right-[30%] w-2 h-2 rounded-full bg-destructive" />}
             </button>
-            <button onClick={() => setActiveTab("goals")} aria-label="Goals" className={`flex items-center justify-center gap-2 flex-1 py-4 px-2 rounded-full transition-all duration-300 ${activeTab === "goals" ? "bg-primary text-white shadow-xl shadow-primary/30" : "text-muted-foreground hover:bg-muted"}`}>
+            <button onClick={() => setActiveTab("goals")} aria-label="Target" className={`flex items-center justify-center gap-2 flex-1 py-4 px-2 rounded-full transition-all duration-300 ${activeTab === "goals" ? "bg-primary text-white shadow-xl shadow-primary/30" : "text-muted-foreground hover:bg-muted"}`}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-              {activeTab === "goals" && <span className="text-xs font-black uppercase tracking-widest ml-1">Goals</span>}
+              {activeTab === "goals" && <span className="text-xs font-black uppercase tracking-widest ml-1">Target</span>}
             </button>
           </nav>
         )}
@@ -889,6 +990,16 @@ export default function Home() {
                   </select>
                 </div>
                 <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase ml-1">Tanggal</label>
+                  <input
+                    type="date"
+                    required
+                    value={editingTransaction.date}
+                    onChange={(e) => setEditingTransaction({ ...editingTransaction, date: e.target.value })}
+                    className="w-full bg-muted border-none p-4 rounded-2xl font-bold focus:ring-2 ring-primary outline-none transition-all"
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
                   <label className="text-[10px] font-bold text-muted-foreground uppercase ml-1">Catatan</label>
                   <input
                     type="text"
@@ -899,11 +1010,9 @@ export default function Home() {
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <label className="text-[10px] font-bold text-muted-foreground uppercase ml-1">Jumlah (Rp)</label>
-                  <input
-                    type="number"
-                    min="1"
+                  <AmountInput
                     value={editingTransaction.amount}
-                    onChange={(e) => setEditingTransaction({ ...editingTransaction, amount: e.target.value })}
+                    onChange={(v) => setEditingTransaction({ ...editingTransaction, amount: v })}
                     className="w-full bg-muted border-none p-4 rounded-2xl font-bold focus:ring-2 ring-primary outline-none transition-all"
                   />
                 </div>
@@ -939,22 +1048,36 @@ export default function Home() {
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold text-muted-foreground uppercase ml-1">Terkumpul (Rp)</label>
-                  <input
-                    type="number"
-                    min="0"
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase ml-1">Hubungkan ke Kategori</label>
+                  <select
+                    value={editingGoal.category}
+                    onChange={(e) => setEditingGoal({ ...editingGoal, category: e.target.value })}
+                    className="w-full bg-muted border-none p-4 rounded-2xl font-bold appearance-none outline-none focus:ring-2 ring-primary transition-all"
+                  >
+                    <option value="">Tidak dihubungkan (isi manual)</option>
+                    {goalCategoriesFor(editingGoal.id).map(c => (
+                      <option key={c.value} value={c.value}>{c.icon} {c.value}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase ml-1">{editingGoal.category ? "Saldo Awal (Rp)" : "Terkumpul (Rp)"}</label>
+                  <AmountInput
                     value={editingGoal.currentAmount}
-                    onChange={(e) => setEditingGoal({ ...editingGoal, currentAmount: e.target.value })}
+                    onChange={(v) => setEditingGoal({ ...editingGoal, currentAmount: v })}
                     className="w-full bg-muted border-none p-4 rounded-2xl font-bold focus:ring-2 ring-primary transition-all outline-none"
                   />
+                  {editingGoal.category && (
+                    <p className="text-[11px] text-muted-foreground ml-1">
+                      Ditambah {formatRupiah(spentAllTime.get(editingGoal.category) ?? 0)} dari transaksi {editingGoal.category}. Kurangi saldo awal kalau Anda menarik dana dari tabungan ini.
+                    </p>
+                  )}
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <label className="text-[10px] font-bold text-muted-foreground uppercase ml-1">Target Total (Rp)</label>
-                  <input
-                    type="number"
-                    min="1"
+                  <AmountInput
                     value={editingGoal.targetAmount}
-                    onChange={(e) => setEditingGoal({ ...editingGoal, targetAmount: e.target.value })}
+                    onChange={(v) => setEditingGoal({ ...editingGoal, targetAmount: v })}
                     className="w-full bg-muted border-none p-4 rounded-2xl font-bold focus:ring-2 ring-primary transition-all outline-none"
                   />
                 </div>
@@ -986,12 +1109,10 @@ export default function Home() {
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <label className="text-[10px] font-bold text-muted-foreground uppercase ml-1">Batas per Bulan (Rp)</label>
-                  <input
-                    type="number"
-                    min="1"
+                  <AmountInput
                     autoFocus
                     value={editingBudget.limit}
-                    onChange={(e) => setEditingBudget({ ...editingBudget, limit: e.target.value })}
+                    onChange={(v) => setEditingBudget({ ...editingBudget, limit: v })}
                     className="w-full bg-muted border-none p-4 rounded-2xl font-bold focus:ring-2 ring-primary transition-all outline-none"
                   />
                   <p className="text-[11px] text-muted-foreground ml-1">Perubahan berlaku untuk bulan ini dan bulan-bulan berikutnya.</p>

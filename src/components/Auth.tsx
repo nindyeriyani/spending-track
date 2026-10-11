@@ -8,6 +8,7 @@ import {
     signInWithPopup,
     signInWithRedirect,
     getRedirectResult,
+    sendPasswordResetEmail,
     GoogleAuthProvider
 } from "firebase/auth";
 import { errorCode } from "@/lib/types";
@@ -23,6 +24,7 @@ const AUTH_ERROR_MESSAGES: Record<string, string> = {
     "auth/too-many-requests": "Terlalu banyak percobaan. Coba lagi beberapa saat lagi.",
     "auth/network-request-failed": "Koneksi bermasalah. Periksa internet Anda.",
     "auth/user-disabled": "Akun ini telah dinonaktifkan.",
+    "auth/missing-email": "Isi email terlebih dahulu.",
 };
 
 function authErrorMessage(err: unknown, fallback: string): string {
@@ -35,6 +37,7 @@ export default function Auth() {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState<string | null>(null);
+    const [info, setInfo] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [redirectProcessing, setRedirectProcessing] = useState(true);
 
@@ -51,9 +54,31 @@ export default function Auth() {
             });
     }, []);
 
+    const handleResetPassword = async () => {
+        setError(null);
+        setInfo(null);
+        const target = email.trim();
+        if (!target) {
+            setError("Isi email Anda dulu, lalu ketuk \"Lupa password?\" lagi.");
+            return;
+        }
+        setLoading(true);
+        try {
+            await sendPasswordResetEmail(auth, target);
+            // Firebase tidak memberi tahu apakah email terdaftar (perlindungan enumerasi email)
+            setInfo(`Kalau ${target} terdaftar, link untuk membuat password baru sudah dikirim. Cek juga folder spam.`);
+        } catch (err) {
+            console.error(err);
+            setError(authErrorMessage(err, "Gagal mengirim email reset password."));
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const handleAuth = async (e: React.FormEvent) => {
         e.preventDefault();
         setError(null);
+        setInfo(null);
         setLoading(true);
 
         try {
@@ -72,6 +97,7 @@ export default function Auth() {
 
     const handleGoogleLogin = async () => {
         setError(null);
+        setInfo(null);
         setLoading(true);
         const provider = new GoogleAuthProvider();
 
@@ -112,13 +138,19 @@ export default function Auth() {
                         Spending Track
                     </h1>
                     <p className="text-muted-foreground font-medium">
-                        {isLogin ? "Welcome back! Please login to continue." : "Create an account to start tracking."}
+                        {isLogin ? "Selamat datang kembali! Silakan masuk." : "Buat akun untuk mulai mencatat keuangan."}
                     </p>
                 </div>
 
                 {error && (
                     <div className="mb-6 p-4 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-sm font-medium animate-shake">
                         {error}
+                    </div>
+                )}
+
+                {info && (
+                    <div className="mb-6 p-4 rounded-xl bg-success/10 border border-success/20 text-success text-sm font-medium">
+                        {info}
                     </div>
                 )}
 
@@ -145,6 +177,16 @@ export default function Auth() {
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
                         />
+                        {isLogin && (
+                            <button
+                                type="button"
+                                onClick={handleResetPassword}
+                                disabled={loading}
+                                className="mt-2 ml-1 text-xs font-bold text-primary hover:underline disabled:opacity-50"
+                            >
+                                Lupa password?
+                            </button>
+                        )}
                     </div>
 
                     <button
@@ -158,10 +200,10 @@ export default function Auth() {
                                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                 </svg>
-                                Processing...
+                                Memproses...
                             </span>
                         ) : (
-                            isLogin ? "Login Now" : "Create Account"
+                            isLogin ? "Masuk" : "Daftar"
                         )}
                     </button>
                 </form>
@@ -171,7 +213,7 @@ export default function Auth() {
                         <span className="w-full border-t border-border"></span>
                     </div>
                     <div className="relative flex justify-center text-xs uppercase">
-                        <span className="bg-[#f0f4f8] px-4 text-muted-foreground font-bold tracking-widest">Or continue with</span>
+                        <span className="bg-[#f0f4f8] px-4 text-muted-foreground font-bold tracking-widest">Atau masuk dengan</span>
                     </div>
                 </div>
 
@@ -186,16 +228,16 @@ export default function Auth() {
                         <path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"></path>
                         <path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z"></path>
                     </svg>
-                    Google Account
+                    Akun Google
                 </button>
 
                 <p className="text-center text-sm font-medium text-muted-foreground">
-                    {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
+                    {isLogin ? "Belum punya akun?" : "Sudah punya akun?"}{" "}
                     <button
-                        onClick={() => setIsLogin(!isLogin)}
+                        onClick={() => { setIsLogin(!isLogin); setError(null); setInfo(null); }}
                         className="text-primary font-bold hover:underline"
                     >
-                        {isLogin ? "Sign Up" : "Login"}
+                        {isLogin ? "Daftar" : "Masuk"}
                     </button>
                 </p>
             </div>
