@@ -16,7 +16,8 @@ export const metadata: Metadata = {
   title: "Spending Track",
   description: "Catatan pemasukan, pengeluaran, budget, dan target keuangan",
   icons: {
-    icon: "/favicon.png",
+    icon: "/logo-spending-tracker.png",
+    apple: "/logo-spending-tracker.png",
   },
 };
 
