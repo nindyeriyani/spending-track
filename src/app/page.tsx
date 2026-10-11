@@ -370,7 +370,7 @@ export default function Home() {
     commit(setDoc(doc(db, "users", user.uid, "budgets", key), budget), "Gagal menyimpan budget.");
   };
 
-  const handleSaveBudget = (e: React.FormEvent) => {
+  const handleSaveBudget = (e: React.SubmitEvent) => {
     e.preventDefault();
     if (!user || !editingBudget) return;
     const limit = Number(editingBudget.limit);
@@ -388,7 +388,7 @@ export default function Home() {
     commit(addDoc(collection(db, "users", user.uid, "goals"), goal), "Gagal menyimpan target.");
   };
 
-  const handleSaveTransaction = (e: React.FormEvent) => {
+  const handleSaveTransaction = (e: React.SubmitEvent) => {
     e.preventDefault();
     if (!user || !editingTransaction) return;
     const amount = Number(editingTransaction.amount);
@@ -418,7 +418,7 @@ export default function Home() {
     }
   };
 
-  const handleSaveGoal = (e: React.FormEvent) => {
+  const handleSaveGoal = (e: React.SubmitEvent) => {
     e.preventDefault();
     if (!user || !editingGoal) return;
     const name = editingGoal.name.trim();
@@ -538,7 +538,7 @@ export default function Home() {
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
               </button>
-              <p className="text-muted-foreground text-sm font-medium min-w-[7.5rem] text-center">{formattedMonth}</p>
+              <p className="text-muted-foreground text-sm font-medium min-w-30 text-center">{formattedMonth}</p>
               <button
                 onClick={() => shiftMonth(1)}
                 disabled={isCurrentMonth}
@@ -577,7 +577,7 @@ export default function Home() {
         </header>
 
         {activeTab === "overview" && (
-          <div className="flex flex-col gap-8 animate-[slide-up_0.4s_ease-out]">
+          <div className="flex flex-col gap-8 animate-slide-up">
             {/* Total Balance Card */}
             <div className="gradient-card p-8 flex flex-col gap-8 relative overflow-hidden">
               <div className="absolute top-[-20%] right-[-10%] w-40 h-40 bg-white/10 rounded-full blur-3xl" />
@@ -659,7 +659,7 @@ export default function Home() {
                 </button>
               </div>
 
-              <div className="flex flex-col gap-4 relative min-h-[100px]">
+              <div className="flex flex-col gap-4 relative min-h-25">
                 {dataLoading && <div className="absolute inset-0 bg-background/50 flex items-center justify-center z-10"><div className="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin" /></div>}
                 {filteredTransactions.length === 0 ? (
                   <div className="text-center py-12 opacity-40 font-medium italic premium-card">Belum ada transaksi di bulan ini</div>
@@ -731,7 +731,7 @@ export default function Home() {
         )}
 
         {activeTab === "budget" && (
-          <div className="flex flex-col gap-8 animate-[slide-up_0.4s_ease-out]">
+          <div className="flex flex-col gap-8 animate-slide-up">
             {/* Budget Summary Card */}
             <div className="gradient-card p-8 flex flex-col gap-6 relative overflow-hidden">
               <div className="absolute top-[-20%] right-[-10%] w-40 h-40 bg-white/10 rounded-full blur-3xl" />
@@ -791,7 +791,7 @@ export default function Home() {
                 )}
               </div>
 
-              <div className="flex flex-col gap-4 relative min-h-[100px]">
+              <div className="flex flex-col gap-4 relative min-h-25">
                 {budgetsLoading && <div className="absolute inset-0 bg-background/50 flex items-center justify-center z-10"><div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>}
                 {budgetRows.length === 0 ? (
                   <div className="text-center py-12 opacity-40 font-medium italic premium-card">Belum ada budget. Tambahkan budget per kategori.</div>
@@ -826,7 +826,7 @@ export default function Home() {
         )}
 
         {activeTab === "goals" && (
-          <div className="flex flex-col gap-8 animate-[slide-up_0.4s_ease-out]">
+          <div className="flex flex-col gap-8 animate-slide-up">
             {/* Goals Section */}
             <div className="flex flex-col gap-4">
               <div className="flex justify-between items-center px-1">
@@ -843,7 +843,7 @@ export default function Home() {
                 />
               </div>
 
-              <div className="flex flex-col gap-4 relative min-h-[100px]">
+              <div className="flex flex-col gap-4 relative min-h-25">
                 {goalsLoading && <div className="absolute inset-0 bg-background/50 flex items-center justify-center z-10"><div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>}
                 {goalRows.length === 0 ? (
                   <div className="text-center py-12 opacity-40 font-medium italic premium-card">Belum ada target</div>
@@ -876,9 +876,9 @@ export default function Home() {
                               {goal.category ? categoryIcon(goal.category) : "🎯"}
                             </div>
                             <div className="flex flex-col min-w-0">
-                              <h4 className="font-bold truncate max-w-[150px]">{goal.name}</h4>
+                              <h4 className="font-bold truncate max-w-37.5">{goal.name}</h4>
                               {goal.category && (
-                                <span className="text-[10px] font-bold text-muted-foreground truncate max-w-[170px]">Otomatis dari kategori {goal.category}</span>
+                                <span className="text-[10px] font-bold text-muted-foreground truncate max-w-42.5">Otomatis dari kategori {goal.category}</span>
                               )}
                             </div>
                           </div>
@@ -925,7 +925,7 @@ export default function Home() {
 
         {/* Custom Premium Alert */}
         {alert && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-[fade-in_0.2s_ease-out]">
+          <div className="fixed inset-0 z-100 flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-[fade-in_0.2s_ease-out]">
             <div className="w-full max-w-xs premium-card p-8 flex flex-col items-center text-center gap-6 animate-[scale-up_0.3s_ease-out]">
               <div className={`w-16 h-16 rounded-full flex items-center justify-center text-3xl ${alert.type === "success" ? "bg-success/20 text-success" : alert.type === "error" ? "bg-destructive/20 text-destructive" : "bg-primary/20 text-primary"}`}>
                 {alert.type === "success" ? "✓" : alert.type === "error" ? "✕" : "💬"}
@@ -947,7 +947,7 @@ export default function Home() {
 
         {/* Edit Transaction Modal */}
         {editingTransaction && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-[fade-in_0.2s_ease-out]">
+          <div className="fixed inset-0 z-60 flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-[fade-in_0.2s_ease-out]">
             <form onSubmit={handleSaveTransaction} className="w-full max-w-sm premium-card p-8 flex flex-col gap-6 animate-[slide-up_0.3s_ease-out]">
               <div className="flex justify-between items-center">
                 <h3 className="text-xl font-bold">Edit Transaksi</h3>
@@ -1029,7 +1029,7 @@ export default function Home() {
 
         {/* Edit Goal Modal */}
         {editingGoal && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-[fade-in_0.2s_ease-out]">
+          <div className="fixed inset-0 z-60 flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-[fade-in_0.2s_ease-out]">
             <form onSubmit={handleSaveGoal} className="w-full max-w-sm premium-card p-8 flex flex-col gap-6 animate-[slide-up_0.3s_ease-out]">
               <div className="flex justify-between items-center">
                 <h3 className="text-xl font-bold">Edit Target</h3>
@@ -1094,7 +1094,7 @@ export default function Home() {
 
         {/* Edit Budget Modal */}
         {editingBudget && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-[fade-in_0.2s_ease-out]">
+          <div className="fixed inset-0 z-60 flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-[fade-in_0.2s_ease-out]">
             <form onSubmit={handleSaveBudget} className="w-full max-w-sm premium-card p-8 flex flex-col gap-6 animate-[slide-up_0.3s_ease-out]">
               <div className="flex justify-between items-center">
                 <h3 className="text-xl font-bold">Edit Budget</h3>

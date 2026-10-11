@@ -26,7 +26,7 @@ export default function AddExpenseForm({ onAdd, trigger, onOpenChange }: { onAdd
         note: "",
     });
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.SubmitEvent) => {
         e.preventDefault();
         const amount = Number(formData.amount);
         if (!Number.isFinite(amount) || amount <= 0) {

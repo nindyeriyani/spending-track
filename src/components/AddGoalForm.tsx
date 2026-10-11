@@ -24,7 +24,7 @@ export default function AddGoalForm({ onAdd, categories, trigger, onOpenChange }
         category: "",
     });
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.SubmitEvent) => {
         e.preventDefault();
         const name = formData.name.trim();
         const targetAmount = Number(formData.targetAmount);

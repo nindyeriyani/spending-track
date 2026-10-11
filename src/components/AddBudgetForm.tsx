@@ -21,7 +21,7 @@ export default function AddBudgetForm({ onAdd, categories, trigger, onOpenChange
         if (onOpenChange) onOpenChange(open);
     };
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.SubmitEvent) => {
         e.preventDefault();
         const limit = Number(formData.limit);
         if (!formData.category) {

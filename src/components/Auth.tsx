@@ -75,7 +75,7 @@ export default function Auth() {
         }
     };
 
-    const handleAuth = async (e: React.FormEvent) => {
+    const handleAuth = async (e: React.SubmitEvent) => {
         e.preventDefault();
         setError(null);
         setInfo(null);
@@ -134,7 +134,7 @@ export default function Auth() {
 
             <div className="glass w-full max-w-md p-8 sm:p-10 rounded-3xl shadow-2xl animate-[slide-up_0.6s_ease-out] relative z-10 border border-white/20">
                 <div className="text-center mb-8">
-                    <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-indigo-600 bg-clip-text text-transparent mb-2">
+                    <h1 className="text-3xl font-bold bg-linear-to-r from-primary to-indigo-600 bg-clip-text text-transparent mb-2">
                         Spending Track
                     </h1>
                     <p className="text-muted-foreground font-medium">
@@ -244,7 +244,7 @@ export default function Auth() {
 
             {/* Redirect Processing Overlay */}
             {redirectProcessing && (
-                <div className="fixed inset-0 z-[200] bg-black/40 backdrop-blur-md flex flex-col items-center justify-center text-white gap-4 animate-[fade-in_0.3s_ease-out]">
+                <div className="fixed inset-0 z-200 bg-black/40 backdrop-blur-md flex flex-col items-center justify-center text-white gap-4 animate-fade-in">
                     <div className="w-12 h-12 border-4 border-white/20 border-t-white rounded-full animate-spin" />
                     <p className="font-bold tracking-wide animate-pulse uppercase text-xs">Menyelesaikan Login...</p>
                 </div>
