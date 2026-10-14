@@ -1,13 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faXmark } from "@fortawesome/free-solid-svg-icons";
 import AmountInput from "@/components/AmountInput";
-import { errorMessage, type GoalInput } from "@/lib/types";
-
-type CategoryOption = { value: string; icon: string };
+import { errorMessage, type Category, type GoalInput } from "@/lib/types";
 
 // `categories` hanya berisi kategori pengeluaran yang belum terhubung ke target lain
-export default function AddGoalForm({ onAdd, categories, trigger, onOpenChange }: { onAdd?: (goal: GoalInput) => Promise<void> | void, categories: readonly CategoryOption[], trigger?: React.ReactNode, onOpenChange?: (open: boolean) => void }) {
+export default function AddGoalForm({ onAdd, categories, trigger, onOpenChange }: { onAdd?: (goal: GoalInput) => Promise<void> | void, categories: readonly Category[], trigger?: React.ReactNode, onOpenChange?: (open: boolean) => void }) {
     const [isOpen, setIsOpen] = useState(false);
 
     const toggleOpen = (open: boolean) => {
@@ -83,10 +83,12 @@ export default function AddGoalForm({ onAdd, categories, trigger, onOpenChange }
                         <div className="flex justify-between items-center mb-6">
                             <h2 className="text-xl font-bold text-foreground">Tambah Target Keuangan</h2>
                             <button
+                                type="button"
+                                aria-label="Tutup"
                                 onClick={() => toggleOpen(false)}
                                 className="text-muted-foreground hover:text-foreground transition-colors w-8 h-8 flex items-center justify-center rounded-full hover:bg-muted"
                             >
-                                ✕
+                                <FontAwesomeIcon icon={faXmark} />
                             </button>
                         </div>
 
@@ -133,7 +135,7 @@ export default function AddGoalForm({ onAdd, categories, trigger, onOpenChange }
                                 >
                                     <option value="">Tidak dihubungkan (isi manual)</option>
                                     {categories.map((c) => (
-                                        <option key={c.value} value={c.value}>{c.icon} {c.value}</option>
+                                        <option key={c.id} value={c.name}>{c.name}</option>
                                     ))}
                                 </select>
                                 {formData.category && (

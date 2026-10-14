@@ -10,13 +10,18 @@ service cloud.firestore {
     }
 
     function isValidTransaction(data) {
-      return data.keys().hasOnly(['type', 'amount', 'category', 'date', 'note'])
+      return data.keys().hasOnly(['type', 'amount', 'category', 'date', 'note', 'createdAt'])
         && data.keys().hasAll(['type', 'amount', 'category', 'date', 'note'])
         && data.type in ['income', 'expense']
         && data.amount is number && data.amount > 0
         && data.category is string && data.category.size() > 0 && data.category.size() <= 50
         && data.date is string && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-        && data.note is string && data.note.size() <= 500;
+        && data.note is string && data.note.size() <= 500
+        && (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+    function isValidCategoryName(name) {
+      return name is string && name.size() > 0 && name.size() <= 50;
     }
 
     // `category` opsional: kategori pengeluaran yang terhubung ke target
@@ -26,37 +31,25 @@ service cloud.firestore {
         && data.name is string && data.name.size() > 0 && data.name.size() <= 100
         && data.targetAmount is number && data.targetAmount > 0
         && data.currentAmount is number && data.currentAmount >= 0
-        && (!('category' in data) || data.category in budgetCategories().values());
+        && (!('category' in data) || isValidCategoryName(data.category));
     }
 
-    // ID dokumen -> nama kategori, harus sama dengan EXPENSE_CATEGORIES di src/lib/categories.ts
-    function budgetCategories() {
-      return {
-        'tabungan-haji': 'Tabungan Haji',
-        'orang-tua': 'Orang Tua',
-        'dana-darurat': 'Dana Darurat',
-        'makan-jajan': 'Makan/Jajan',
-        'transportasi': 'Transportasi',
-        'servis-motor': 'Servis Motor',
-        'skincare-perawatan': 'Skincare & Perawatan',
-        'tabungan-pakaian': 'Tabungan Pakaian',
-        'kuota-langganan': 'Kuota & Langganan',
-        'kebutuhan-rumah': 'Kebutuhan Rumah',
-        'sedekah': 'Sedekah',
-        'kado-traktiran': 'Kado & Traktiran',
-        'hiburan': 'Hiburan',
-        'pengembangan-diri': 'Pengembangan Diri',
-        'wishlist': 'Wishlist',
-        'cadangan-tak-terduga': 'Cadangan Tak Terduga'
-      };
-    }
-
-    function isValidBudget(budgetId, data) {
+    // ID dokumen budget = ID dokumen kategori (budget lama memakai ID seperti 'makan-jajan')
+    function isValidBudget(data) {
       return data.keys().hasOnly(['category', 'limit'])
         && data.keys().hasAll(['category', 'limit'])
-        && budgetId in budgetCategories()
-        && data.category == budgetCategories()[budgetId]
+        && isValidCategoryName(data.category)
         && data.limit is number && data.limit > 0;
+    }
+
+    function isValidCategory(data) {
+      return data.keys().hasOnly(['name', 'icon', 'type', 'savings', 'createdAt'])
+        && data.keys().hasAll(['name', 'icon', 'type', 'savings'])
+        && isValidCategoryName(data.name)
+        && data.icon is string && data.icon.matches('^[a-z0-9-]{1,40}$')
+        && data.type in ['income', 'expense']
+        && data.savings is bool && (data.type == 'expense' || data.savings == false)
+        && (!('createdAt' in data) || data.createdAt is timestamp);
     }
 
     match /users/{userId}/transactions/{txId} {
@@ -71,7 +64,12 @@ service cloud.firestore {
 
     match /users/{userId}/budgets/{budgetId} {
       allow read, delete: if isOwner(userId);
-      allow create, update: if isOwner(userId) && isValidBudget(budgetId, request.resource.data);
+      allow create, update: if isOwner(userId) && isValidBudget(request.resource.data);
+    }
+
+    match /users/{userId}/categories/{categoryId} {
+      allow read, delete: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidCategory(request.resource.data);
     }
 
     // Selain path di atas, semuanya ditolak.

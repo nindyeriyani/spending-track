@@ -1,4 +1,5 @@
 import { FirebaseError } from "firebase/app";
+import type { Timestamp } from "firebase/firestore";
 
 export type TransactionType = "income" | "expense";
 
@@ -9,9 +10,24 @@ export interface TransactionInput {
     category: string;
     date: string; // "YYYY-MM-DD", tanggal lokal
     note: string;
+    createdAt?: Timestamp; // waktu input; transaksi lama tidak punya field ini
 }
 
 export interface Transaction extends TransactionInput {
+    id: string;
+}
+
+// Bentuk dokumen di users/{uid}/categories. Nama unik per user (tidak peka huruf besar/kecil).
+// `savings` hanya bermakna untuk kategori pengeluaran.
+export interface CategoryInput {
+    name: string;
+    icon: string; // nama ikon Font Awesome, mis. "utensils"
+    type: TransactionType;
+    savings: boolean;
+    createdAt?: Timestamp;
+}
+
+export interface Category extends CategoryInput {
     id: string;
 }
 
@@ -29,8 +45,8 @@ export interface Goal extends GoalInput {
     id: string;
 }
 
-// Bentuk dokumen di users/{uid}/budgets/{category}.
-// ID dokumen = nama kategori, jadi satu kategori hanya punya satu budget yang berlaku tiap bulan.
+// Bentuk dokumen di users/{uid}/budgets/{categoryId}.
+// ID dokumen = ID kategori, jadi satu kategori hanya punya satu budget yang berlaku tiap bulan.
 export interface BudgetInput {
     category: string;
     limit: number;

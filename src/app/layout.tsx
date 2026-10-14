@@ -1,6 +1,11 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { config } from "@fortawesome/fontawesome-svg-core";
+import "@fortawesome/fontawesome-svg-core/styles.css";
 import "./globals.css";
+
+// CSS Font Awesome sudah diimpor di atas; jangan disisipkan lagi saat runtime (mencegah ikon berkedip besar)
+config.autoAddCss = false;
 
 const geistSans = Geist({
   variable: "--font-geist-sans",

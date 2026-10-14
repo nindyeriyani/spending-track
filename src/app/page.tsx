@@ -5,16 +5,19 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import AddExpenseForm from "@/components/AddExpenseForm";
 import AddGoalForm from "@/components/AddGoalForm";
 import AddBudgetForm from "@/components/AddBudgetForm";
+import ManageCategories from "@/components/ManageCategories";
 import AmountInput from "@/components/AmountInput";
 import Auth from "@/components/Auth";
 import { auth, db } from "@/lib/firebase";
 import { monthKey, parseLocalDate } from "@/lib/date";
-import { BUDGET_CATEGORIES, EXPENSE_CATEGORIES, budgetKey, categoriesFor, categoryIcon, isSavingsCategory } from "@/lib/categories";
+import { categoriesFor, categoryIcon as iconFor } from "@/lib/categories";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faArrowRight, faBuildingColumns, faBullseye, faCheck, faCircleQuestion, faTriangleExclamation, faXmark } from "@fortawesome/free-solid-svg-icons";
 import { goalSaved, isGoalReached } from "@/lib/goals";
 import { BUDGET_WARNING_RATIO, budgetStatus, daysLeftInMonth, needsAttention, spentByCategory, type BudgetStatus } from "@/lib/budget";
 import { exportMonthToExcel } from "@/lib/exportExcel";
 import { formatNumber, formatRupiah } from "@/lib/format";
-import type { Budget, BudgetInput, Goal, GoalInput, Transaction, TransactionInput } from "@/lib/types";
+import type { Budget, BudgetInput, Category, CategoryInput, Goal, GoalInput, Transaction, TransactionInput } from "@/lib/types";
 import { onAuthStateChanged, signOut, User } from "firebase/auth";
 import {
   collection,
@@ -22,6 +25,7 @@ import {
   onSnapshot,
   addDoc,
   updateDoc,
+  serverTimestamp,
   deleteDoc,
   setDoc,
   doc,
@@ -40,7 +44,7 @@ const STATUS_STYLES: Record<BudgetStatus, { bar: string; badge: string; label: s
   warning: { bar: "bg-warning", badge: "bg-warning/15 text-warning", label: "Hampir habis" },
   over: { bar: "bg-destructive", badge: "bg-destructive/10 text-destructive", label: "Terlampaui" },
   saving: { bar: "bg-primary", badge: "bg-primary/10 text-primary", label: "Menabung" },
-  saved: { bar: "bg-success", badge: "bg-success/10 text-success", label: "Tercapai ✓" },
+  saved: { bar: "bg-success", badge: "bg-success/10 text-success", label: "Tercapai" },
 };
 
 // Angka di form edit disimpan sebagai string supaya field bisa dikosongkan saat mengetik
@@ -60,6 +64,10 @@ export default function Home() {
   const [goalsLoading, setGoalsLoading] = useState(true);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [budgetsLoading, setBudgetsLoading] = useState(true);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [managingCategories, setManagingCategories] = useState(false);
+  // URL foto profil yang gagal dimuat; avatar lalu memakai huruf pertama email
+  const [brokenPhotoURL, setBrokenPhotoURL] = useState<string | null>(null);
 
   const [editingGoal, setEditingGoal] = useState<EditableGoal | null>(null);
   const [editingBudget, setEditingBudget] = useState<EditableBudget | null>(null);
@@ -140,6 +148,8 @@ export default function Home() {
       setRecentTransactions([]);
       setGoals([]);
       setBudgets([]);
+      setCategories([]);
+      setManagingCategories(false);
       setDataLoading(true);
       setGoalsLoading(true);
       setBudgetsLoading(true);
@@ -165,7 +175,10 @@ export default function Home() {
       orderBy("date", "desc")
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const txs = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as TransactionInput) }));
+      // Urutkan dari yang paling terakhir diinput; transaksi lama tanpa `createdAt` ditaruh di bawah, urut tanggal
+      const txs = snapshot.docs
+        .map(doc => ({ id: doc.id, ...(doc.data({ serverTimestamps: "estimate" }) as TransactionInput) }))
+        .sort((a, b) => (b.createdAt?.toMillis() ?? 0) - (a.createdAt?.toMillis() ?? 0) || b.date.localeCompare(a.date));
       setRecentTransactions(txs);
       setDataLoading(false);
     }, (err) => {
@@ -207,6 +220,29 @@ export default function Home() {
     return () => unsubscribe();
   }, [user, showAlert]);
 
+  // Sync Categories (urut sesuai waktu dibuat)
+  useEffect(() => {
+    if (!user) return;
+    const q = collection(db, "users", user.uid, "categories");
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setCategories(snapshot.docs
+        .map(doc => ({ id: doc.id, ...(doc.data({ serverTimestamps: "estimate" }) as CategoryInput) }))
+        .sort((a, b) => (a.createdAt?.toMillis() ?? 0) - (b.createdAt?.toMillis() ?? 0)));
+    }, (err) => {
+      console.error("Failed to load categories:", err);
+      showAlert("Gagal memuat kategori.", "error");
+    });
+    return () => unsubscribe();
+  }, [user, showAlert]);
+
+  const expenseCategories = useMemo(() => categoriesFor(categories, "expense"), [categories]);
+  const savingsCategories = useMemo(
+    () => new Set(expenseCategories.filter((c) => c.savings).map((c) => c.name)),
+    [expenseCategories]
+  );
+  const isSavingsCategory = useCallback((name: string) => savingsCategories.has(name), [savingsCategories]);
+  const categoryIcon = (name: string) => <FontAwesomeIcon icon={iconFor(categories, name)} />;
+
   // Totals Calculation
   const filteredTransactions = useMemo(() => {
     const key = monthKey(currentMonth);
@@ -224,13 +260,17 @@ export default function Home() {
       else expense += tx.amount;
     });
     return { totalIncome: income, totalExpense: expense, totalSavings: savings, balance: income - expense - savings };
-  }, [filteredTransactions]);
+  }, [filteredTransactions, isSavingsCategory]);
 
   // Budget bulan berjalan: limit berlaku tiap bulan, pemakaian dihitung dari transaksi bulan ini
   const spentThisMonth = useMemo(() => spentByCategory(filteredTransactions), [filteredTransactions]);
 
   const budgetRows = useMemo(() => {
-    const order = (category: string) => BUDGET_CATEGORIES.findIndex((c) => c.value === category);
+    // Urut sesuai daftar kategori; budget yang kategorinya sudah dihapus ditaruh paling bawah
+    const order = (category: string) => {
+      const i = expenseCategories.findIndex((c) => c.name === category);
+      return i === -1 ? Infinity : i;
+    };
     return budgets
       .map((b) => {
         const spent = spentThisMonth.get(b.category) ?? 0;
@@ -238,7 +278,7 @@ export default function Home() {
         return { ...b, spent, isSavings, status: budgetStatus(spent, b.limit, isSavings) };
       })
       .sort((a, b) => order(a.category) - order(b.category));
-  }, [budgets, spentThisMonth]);
+  }, [budgets, spentThisMonth, expenseCategories, isSavingsCategory]);
 
   const spendingBudgetRows = useMemo(() => budgetRows.filter((b) => !b.isSavings), [budgetRows]);
   const savingsBudgetRows = useMemo(() => budgetRows.filter((b) => b.isSavings), [budgetRows]);
@@ -284,11 +324,11 @@ export default function Home() {
 
   // Satu kategori hanya boleh terhubung ke satu target supaya uangnya tidak terhitung dua kali
   const goalCategoriesFor = (exceptGoalId?: string) =>
-    EXPENSE_CATEGORIES.filter((c) => !goals.some((g) => g.id !== exceptGoalId && g.category === c.value));
+    expenseCategories.filter((c) => !goals.some((g) => g.id !== exceptGoalId && g.category === c.name));
 
   const availableBudgetCategories = useMemo(
-    () => BUDGET_CATEGORIES.filter((c) => !budgets.some((b) => b.category === c.value)),
-    [budgets]
+    () => expenseCategories.filter((c) => !budgets.some((b) => b.category === c.name)),
+    [expenseCategories, budgets]
   );
 
   const handleLogout = async () => {
@@ -309,7 +349,7 @@ export default function Home() {
     if (exporting) return;
     setExporting(true);
     try {
-      await exportMonthToExcel({ monthLabel: formattedMonth, transactions: filteredTransactions, budgets: budgetRows });
+      await exportMonthToExcel({ monthLabel: formattedMonth, transactions: filteredTransactions, budgets: budgetRows, savingsCategories });
     } catch (err) {
       console.error("Failed to export Excel:", err);
       showAlert("Gagal membuat file Excel.", "error");
@@ -320,7 +360,7 @@ export default function Home() {
 
   const handleAddExpense = (expense: TransactionInput) => {
     if (!user) return;
-    commit(addDoc(collection(db, "users", user.uid, "transactions"), expense), "Gagal menyimpan transaksi.");
+    commit(addDoc(collection(db, "users", user.uid, "transactions"), { ...expense, createdAt: serverTimestamp() }), "Gagal menyimpan transaksi.");
 
     const notes: string[] = [];
     let isError = false;
@@ -341,7 +381,7 @@ export default function Home() {
       if (isSavingsCategory(expense.category)) {
         // Untuk tabungan, mencapai budget justru kabar baik
         if (before < budget.limit && after >= budget.limit) {
-          notes.push(`Tabungan ${expense.category} ${when} sudah sesuai rencana ✓`);
+          notes.push(`Tabungan ${expense.category} ${when} sudah sesuai rencana.`);
         }
       } else if (after > budget.limit) {
         notes.push(`Budget ${expense.category} ${when} terlampaui ${formatRupiah(after - budget.limit)}.`);
@@ -355,7 +395,7 @@ export default function Home() {
     if (linkedGoal) {
       const before = goalSaved(linkedGoal, spentAllTime);
       if (!isGoalReached(before, linkedGoal.targetAmount) && isGoalReached(before + expense.amount, linkedGoal.targetAmount)) {
-        notes.unshift(`🎉 Selamat! Target "${linkedGoal.name}" tercapai (${formatRupiah(linkedGoal.targetAmount)}).`);
+        notes.unshift(`Selamat! Target "${linkedGoal.name}" tercapai (${formatRupiah(linkedGoal.targetAmount)}).`);
       }
     }
     if (!navigator.onLine) notes.push("Sedang offline: tersimpan di perangkat dan akan disinkronkan saat online.");
@@ -364,10 +404,23 @@ export default function Home() {
 
   const handleAddBudget = (budget: BudgetInput) => {
     if (!user) return;
-    // ID dokumen diturunkan dari kategori, jadi satu kategori tidak bisa punya dua budget
-    const key = budgetKey(budget.category);
-    if (!key) throw new Error("Kategori tidak bisa diberi budget.");
-    commit(setDoc(doc(db, "users", user.uid, "budgets", key), budget), "Gagal menyimpan budget.");
+    // ID dokumen = ID kategori, jadi satu kategori tidak bisa punya dua budget
+    const category = expenseCategories.find((c) => c.name === budget.category);
+    if (!category) throw new Error("Kategori tidak ditemukan.");
+    commit(setDoc(doc(db, "users", user.uid, "budgets", category.id), budget), "Gagal menyimpan budget.");
+  };
+
+  const handleAddCategory = (category: CategoryInput) => {
+    if (!user) return;
+    commit(addDoc(collection(db, "users", user.uid, "categories"), { ...category, createdAt: serverTimestamp() }), "Gagal menyimpan kategori.");
+  };
+
+  const handleDeleteCategory = (category: Category) => {
+    if (!user) return;
+    showConfirm(`Hapus kategori "${category.name}"? Transaksi, budget, dan target yang memakainya tetap tersimpan.`, () => {
+      commit(deleteDoc(doc(db, "users", user.uid, "categories", category.id)), "Gagal menghapus kategori.");
+      closeAlert();
+    });
   };
 
   const handleSaveBudget = (e: React.SubmitEvent) => {
@@ -394,6 +447,10 @@ export default function Home() {
     const amount = Number(editingTransaction.amount);
     if (!Number.isFinite(amount) || amount <= 0) {
       showAlert("Jumlah harus lebih dari 0.", "error");
+      return;
+    }
+    if (!editingTransaction.category) {
+      showAlert("Pilih kategori.", "error");
       return;
     }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(editingTransaction.date)) {
@@ -449,7 +506,7 @@ export default function Home() {
     const savedNow = goalSaved(updated, spentAllTime);
     setEditingGoal(null);
     if (previous && !previous.reached && isGoalReached(savedNow, targetAmount)) {
-      showAlert(`🎉 Selamat! Target "${name}" tercapai (${formatRupiah(targetAmount)}).`);
+      showAlert(`Selamat! Target "${name}" tercapai (${formatRupiah(targetAmount)}).`);
     } else {
       showAlert("Target berhasil diperbarui.");
     }
@@ -557,23 +614,41 @@ export default function Home() {
               )}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={handleLogout}
-            aria-label={`Keluar dari akun ${user.email ?? ""}`}
-            title="Keluar"
-            className="relative w-10 h-10 rounded-full border-2 border-primary/20 p-0.5 ring-2 ring-primary/5 hover:ring-primary/40 transition-all active:scale-95"
-          >
-            {user.photoURL ? (
-              // Foto profil Google dari domain eksternal; next/image butuh remotePatterns dan tidak sepadan untuk avatar 40px
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={user.photoURL} className="w-full h-full object-cover rounded-full" alt="" />
-            ) : (
-              <span className="w-full h-full rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs uppercase">
-                {user.email?.[0]}
-              </span>
-            )}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setManagingCategories(true)}
+              aria-label="Kelola kategori"
+              title="Kategori"
+              className="w-10 h-10 rounded-full flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><line x1="7" y1="7" x2="7.01" y2="7" /></svg>
+            </button>
+            <button
+              type="button"
+              onClick={handleLogout}
+              aria-label={`Keluar dari akun ${user.email ?? ""}`}
+              title="Keluar"
+              className="relative w-10 h-10 rounded-full border-2 border-primary/20 p-0.5 ring-2 ring-primary/5 hover:ring-primary/40 transition-all active:scale-95"
+            >
+              {user.photoURL && user.photoURL !== brokenPhotoURL ? (
+                // Foto profil Google dari domain eksternal; next/image butuh remotePatterns dan tidak sepadan untuk avatar 40px.
+                // Google sering menolak (403/429) permintaan yang membawa referrer, jadi referrer tidak dikirim.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={user.photoURL}
+                  referrerPolicy="no-referrer"
+                  onError={() => setBrokenPhotoURL(user.photoURL)}
+                  className="w-full h-full object-cover rounded-full"
+                  alt=""
+                />
+              ) : (
+                <span className="w-full h-full rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs uppercase">
+                  {(user.email || user.displayName || "?")[0]}
+                </span>
+              )}
+            </button>
+          </div>
         </header>
 
         {activeTab === "overview" && (
@@ -610,11 +685,11 @@ export default function Home() {
                 onClick={() => setActiveTab("budget")}
                 className="premium-card p-4 flex items-center gap-3 text-left border-warning/40 hover:border-warning transition-colors"
               >
-                <span className="text-xl">⚠️</span>
+                <FontAwesomeIcon icon={faTriangleExclamation} className="text-xl text-warning" />
                 <span className="flex-1 text-sm font-bold">
                   {budgetSummary.alertCount} kategori hampir habis atau melewati budget
                 </span>
-                <span className="text-xs font-bold text-primary">Lihat →</span>
+                <span className="text-xs font-bold text-primary flex items-center gap-1">Lihat <FontAwesomeIcon icon={faArrowRight} /></span>
               </button>
             )}
 
@@ -622,6 +697,8 @@ export default function Home() {
             <div className="grid grid-cols-2 gap-4">
               <AddExpenseForm
                 onAdd={handleAddExpense}
+                categories={categories}
+                onManageCategories={() => setManagingCategories(true)}
                 onOpenChange={setIsAdding}
                 trigger={
                   <div className="action-tile p-6 flex flex-col items-center justify-center gap-3 cursor-pointer group">
@@ -768,7 +845,7 @@ export default function Home() {
               )}
               {budgetSummary.savingsPlanned > 0 && (
                 <p className="text-white/80 text-xs font-bold bg-white/10 rounded-2xl px-4 py-3 -mt-2">
-                  🏦 Tabungan: {formatRupiah(budgetSummary.savingsDone)} dari rencana {formatRupiah(budgetSummary.savingsPlanned)}
+                  <FontAwesomeIcon icon={faBuildingColumns} className="mr-2" />Tabungan: {formatRupiah(budgetSummary.savingsDone)} dari rencana {formatRupiah(budgetSummary.savingsPlanned)}
                 </p>
               )}
             </div>
@@ -777,7 +854,14 @@ export default function Home() {
             <div className="flex flex-col gap-4">
               <div className="flex justify-between items-center px-1">
                 <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Per Kategori</h3>
-                {availableBudgetCategories.length > 0 && (
+                {availableBudgetCategories.length === 0 ? (
+                  <button
+                    onClick={() => setManagingCategories(true)}
+                    className="text-xs font-bold text-primary hover:text-primary/80 transition-colors flex items-center gap-1.5 bg-primary/5 px-3 py-1.5 rounded-full border border-primary/10"
+                  >
+                    <span className="text-sm">+</span> Buat Kategori
+                  </button>
+                ) : (
                   <AddBudgetForm
                     onAdd={handleAddBudget}
                     categories={availableBudgetCategories}
@@ -799,7 +883,7 @@ export default function Home() {
                   <>
                     {spendingBudgetRows.map(renderBudgetCard)}
                     {savingsBudgetRows.length > 0 && (
-                      <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-widest px-1 mt-2">🏦 Tabungan</h4>
+                      <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-widest px-1 mt-2 flex items-center gap-2"><FontAwesomeIcon icon={faBuildingColumns} /> Tabungan</h4>
                     )}
                     {savingsBudgetRows.map(renderBudgetCard)}
                   </>
@@ -873,7 +957,7 @@ export default function Home() {
                         <div className="flex justify-between items-center">
                           <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-xl bg-primary/5 flex items-center justify-center text-lg shrink-0">
-                              {goal.category ? categoryIcon(goal.category) : "🎯"}
+                              <FontAwesomeIcon icon={goal.category ? iconFor(categories, goal.category) : faBullseye} />
                             </div>
                             <div className="flex flex-col min-w-0">
                               <h4 className="font-bold truncate max-w-37.5">{goal.name}</h4>
@@ -883,7 +967,7 @@ export default function Home() {
                             </div>
                           </div>
                           {goal.reached ? (
-                            <span className="text-xs font-black text-success bg-success/10 px-2 py-1 rounded-full shrink-0 mr-8 pointer-fine:mr-0">✓ Tercapai</span>
+                            <span className="text-xs font-black text-success bg-success/10 px-2 py-1 rounded-full shrink-0 mr-8 pointer-fine:mr-0 flex items-center gap-1"><FontAwesomeIcon icon={faCheck} /> Tercapai</span>
                           ) : (
                             <span className="text-xs font-black text-primary bg-primary/10 px-2 py-1 rounded-full shrink-0 mr-8 pointer-fine:mr-0">{Math.round(progress)}%</span>
                           )}
@@ -905,22 +989,28 @@ export default function Home() {
         )}
 
         {/* Floating Bottom Nav */}
-        {!isAdding && !editingGoal && !editingTransaction && !editingBudget && (
+        {!isAdding && !managingCategories && !editingGoal && !editingTransaction && !editingBudget && (
           <nav className="fixed bottom-8 left-1/2 -translate-x-1/2 w-[75%] max-w-sm glass rounded-[2.5rem] p-2 flex justify-center items-center shadow-2xl shadow-primary/20 z-50 border border-white/40 gap-2 animate-[slide-up_0.3s_ease-out]">
             <button onClick={() => setActiveTab("overview")} aria-label="Beranda" className={`flex items-center justify-center gap-2 flex-1 py-4 px-2 rounded-full transition-all duration-300 ${activeTab === "overview" ? "bg-primary text-white shadow-xl shadow-primary/30" : "text-muted-foreground hover:bg-muted"}`}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /></svg>
-              {activeTab === "overview" && <span className="text-xs font-black uppercase tracking-widest ml-1">Beranda</span>}
             </button>
             <button onClick={() => setActiveTab("budget")} aria-label="Budget" className={`relative flex items-center justify-center gap-2 flex-1 py-4 px-2 rounded-full transition-all duration-300 ${activeTab === "budget" ? "bg-primary text-white shadow-xl shadow-primary/30" : "text-muted-foreground hover:bg-muted"}`}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="2" y="5" width="20" height="14" rx="2" /><line x1="2" y1="10" x2="22" y2="10" /></svg>
-              {activeTab === "budget" && <span className="text-xs font-black uppercase tracking-widest ml-1">Budget</span>}
               {activeTab !== "budget" && budgetSummary.alertCount > 0 && <span className="absolute top-3 right-[30%] w-2 h-2 rounded-full bg-destructive" />}
             </button>
             <button onClick={() => setActiveTab("goals")} aria-label="Target" className={`flex items-center justify-center gap-2 flex-1 py-4 px-2 rounded-full transition-all duration-300 ${activeTab === "goals" ? "bg-primary text-white shadow-xl shadow-primary/30" : "text-muted-foreground hover:bg-muted"}`}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-              {activeTab === "goals" && <span className="text-xs font-black uppercase tracking-widest ml-1">Target</span>}
             </button>
           </nav>
+        )}
+
+        {managingCategories && (
+          <ManageCategories
+            categories={categories}
+            onAdd={handleAddCategory}
+            onDelete={handleDeleteCategory}
+            onClose={() => setManagingCategories(false)}
+          />
         )}
 
         {/* Custom Premium Alert */}
@@ -928,7 +1018,7 @@ export default function Home() {
           <div className="fixed inset-0 z-100 flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-[fade-in_0.2s_ease-out]">
             <div className="w-full max-w-xs premium-card p-8 flex flex-col items-center text-center gap-6 animate-[scale-up_0.3s_ease-out]">
               <div className={`w-16 h-16 rounded-full flex items-center justify-center text-3xl ${alert.type === "success" ? "bg-success/20 text-success" : alert.type === "error" ? "bg-destructive/20 text-destructive" : "bg-primary/20 text-primary"}`}>
-                {alert.type === "success" ? "✓" : alert.type === "error" ? "✕" : "💬"}
+                <FontAwesomeIcon icon={alert.type === "success" ? faCheck : alert.type === "error" ? faXmark : faCircleQuestion} />
               </div>
               <p className="font-bold text-lg leading-snug">{alert.message}</p>
               <div className="flex gap-3 w-full">
@@ -965,7 +1055,7 @@ export default function Home() {
                         ...editingTransaction,
                         type: t,
                         // Kategori ikut berganti kalau tidak cocok dengan tipe yang baru
-                        category: categoriesFor(t).some(c => c.value === editingTransaction.category) ? editingTransaction.category : categoriesFor(t)[0].value,
+                        category: categoriesFor(categories, t).some(c => c.name === editingTransaction.category) ? editingTransaction.category : categoriesFor(categories, t)[0]?.name ?? "",
                       })}
                       className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${editingTransaction.type === t ? "bg-background shadow-sm text-foreground" : "text-muted-foreground"}`}
                     >
@@ -980,12 +1070,12 @@ export default function Home() {
                     onChange={(e) => setEditingTransaction({ ...editingTransaction, category: e.target.value })}
                     className="w-full bg-muted border-none p-4 rounded-2xl font-bold appearance-none outline-none focus:ring-2 ring-primary transition-all"
                   >
-                    {categoriesFor(editingTransaction.type).map(c => (
-                      <option key={c.value} value={c.value}>{c.value} {c.icon}</option>
+                    {categoriesFor(categories, editingTransaction.type).map(c => (
+                      <option key={c.id} value={c.name}>{c.name} {c.icon}</option>
                     ))}
-                    {/* Kategori lama yang tidak ada di daftar tetap bisa dipertahankan */}
-                    {!categoriesFor(editingTransaction.type).some(c => c.value === editingTransaction.category) && (
-                      <option value={editingTransaction.category}>{editingTransaction.category}</option>
+                    {/* Kategori yang sudah dihapus tetap bisa dipertahankan */}
+                    {!categoriesFor(categories, editingTransaction.type).some(c => c.name === editingTransaction.category) && (
+                      <option value={editingTransaction.category}>{editingTransaction.category || "Pilih kategori"}</option>
                     )}
                   </select>
                 </div>
@@ -1056,8 +1146,12 @@ export default function Home() {
                   >
                     <option value="">Tidak dihubungkan (isi manual)</option>
                     {goalCategoriesFor(editingGoal.id).map(c => (
-                      <option key={c.value} value={c.value}>{c.icon} {c.value}</option>
+                      <option key={c.id} value={c.name}>{c.icon} {c.name}</option>
                     ))}
+                    {/* Kategori yang sudah dihapus tetap bisa dipertahankan */}
+                    {editingGoal.category && !expenseCategories.some(c => c.name === editingGoal.category) && (
+                      <option value={editingGoal.category}>{editingGoal.category}</option>
+                    )}
                   </select>
                 </div>
                 <div className="flex flex-col gap-1.5">

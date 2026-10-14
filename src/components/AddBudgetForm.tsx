@@ -1,13 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faXmark } from "@fortawesome/free-solid-svg-icons";
 import AmountInput from "@/components/AmountInput";
-import { errorMessage, type BudgetInput } from "@/lib/types";
-
-type CategoryOption = { value: string; icon: string };
+import { errorMessage, type BudgetInput, type Category } from "@/lib/types";
 
 // `categories` hanya berisi kategori yang belum punya budget
-export default function AddBudgetForm({ onAdd, categories, trigger, onOpenChange }: { onAdd?: (budget: BudgetInput) => Promise<void> | void, categories: readonly CategoryOption[], trigger?: React.ReactNode, onOpenChange?: (open: boolean) => void }) {
+export default function AddBudgetForm({ onAdd, categories, trigger, onOpenChange }: { onAdd?: (budget: BudgetInput) => Promise<void> | void, categories: readonly Category[], trigger?: React.ReactNode, onOpenChange?: (open: boolean) => void }) {
     const [isOpen, setIsOpen] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -16,7 +16,7 @@ export default function AddBudgetForm({ onAdd, categories, trigger, onOpenChange
     const toggleOpen = (open: boolean) => {
         setError(null);
         // Pilih kategori pertama yang tersedia setiap kali form dibuka
-        if (open) setFormData({ category: categories[0]?.value ?? "", limit: "" });
+        if (open) setFormData({ category: categories[0]?.name ?? "", limit: "" });
         setIsOpen(open);
         if (onOpenChange) onOpenChange(open);
     };
@@ -68,10 +68,12 @@ export default function AddBudgetForm({ onAdd, categories, trigger, onOpenChange
                         <div className="flex justify-between items-center mb-6">
                             <h2 className="text-xl font-bold text-foreground">Tambah Budget Bulanan</h2>
                             <button
+                                type="button"
+                                aria-label="Tutup"
                                 onClick={() => toggleOpen(false)}
                                 className="text-muted-foreground hover:text-foreground transition-colors w-8 h-8 flex items-center justify-center rounded-full hover:bg-muted"
                             >
-                                ✕
+                                <FontAwesomeIcon icon={faXmark} />
                             </button>
                         </div>
 
@@ -92,7 +94,7 @@ export default function AddBudgetForm({ onAdd, categories, trigger, onOpenChange
                                     className="w-full px-4 py-3 rounded-xl bg-background border border-border focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all disabled:opacity-50"
                                 >
                                     {categories.map((c) => (
-                                        <option key={c.value} value={c.value}>{c.icon} {c.value}</option>
+                                        <option key={c.id} value={c.name}>{c.name}</option>
                                     ))}
                                 </select>
                             </div>

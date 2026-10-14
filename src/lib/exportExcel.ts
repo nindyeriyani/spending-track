@@ -1,13 +1,13 @@
 import type { Borders, Cell, Row, Workbook, Worksheet } from "exceljs";
 import type { Transaction } from "./types";
 import type { BudgetStatus } from "./budget";
-import { isSavingsCategory } from "./categories";
 
 export interface BudgetRow {
     category: string;
     limit: number;
     spent: number;
     status: BudgetStatus;
+    isSavings: boolean;
 }
 
 type Kind = "Pemasukan" | "Pengeluaran" | "Tabungan";
@@ -48,9 +48,9 @@ const STATUS_STYLE: Record<BudgetStatus, { label: string; color: string; fill: s
 const THIN = { style: "thin", color: { argb: COLOR.border } } as const;
 const CELL_BORDER: Partial<Borders> = { top: THIN, left: THIN, bottom: THIN, right: THIN };
 
-function kindOf(tx: Transaction): Kind {
+function kindOf(tx: Transaction, savingsCategories: ReadonlySet<string>): Kind {
     if (tx.type === "income") return "Pemasukan";
-    return isSavingsCategory(tx.category) ? "Tabungan" : "Pengeluaran";
+    return savingsCategories.has(tx.category) ? "Tabungan" : "Pengeluaran";
 }
 
 function solid(argb: string) {
@@ -143,10 +143,11 @@ function setFormula(cell: Cell, formula: string, result: number) {
     cell.value = { formula, result };
 }
 
-export function buildMonthlyReport(ExcelJS: typeof import("exceljs"), { monthLabel, transactions, budgets, generatedAt = new Date() }: {
+export function buildMonthlyReport(ExcelJS: typeof import("exceljs"), { monthLabel, transactions, budgets, savingsCategories, generatedAt = new Date() }: {
     monthLabel: string;
     transactions: Transaction[];
     budgets: BudgetRow[];
+    savingsCategories: ReadonlySet<string>; // nama kategori pengeluaran yang ditandai tabungan
     generatedAt?: Date;
 }): Workbook {
     const workbook = new ExcelJS.Workbook();
@@ -164,7 +165,7 @@ export function buildMonthlyReport(ExcelJS: typeof import("exceljs"), { monthLab
     const totals: Record<Kind, number> = { Pemasukan: 0, Pengeluaran: 0, Tabungan: 0 };
     const byCategory = new Map<string, { kind: Kind; amount: number; count: number }>();
     for (const tx of sorted) {
-        const kind = kindOf(tx);
+        const kind = kindOf(tx, savingsCategories);
         totals[kind] += tx.amount;
         const key = `${kind}|${tx.category}`;
         const entry = byCategory.get(key) ?? { kind, amount: 0, count: 0 };
@@ -250,7 +251,7 @@ export function buildMonthlyReport(ExcelJS: typeof import("exceljs"), { monthLab
 
     const firstTx = 6;
     sorted.forEach((tx, i) => {
-        const kind = kindOf(tx);
+        const kind = kindOf(tx, savingsCategories);
         const row = txSheet.getRow(firstTx + i);
         row.values = [i + 1, excelDate(tx.date), kind, tx.category, tx.note || "-", tx.amount];
         row.getCell(1).alignment = { horizontal: "center" };
@@ -297,11 +298,11 @@ export function buildMonthlyReport(ExcelJS: typeof import("exceljs"), { monthLab
     budgetHeader.values = ["Kategori", "Jenis", "Rencana", "Realisasi", "Sisa", "Pemakaian", "Status"];
     styleHeader(budgetHeader);
 
-    const orderedBudgets = [...budgets].sort((a, b) => Number(isSavingsCategory(a.category)) - Number(isSavingsCategory(b.category)));
+    const orderedBudgets = [...budgets].sort((a, b) => Number(a.isSavings) - Number(b.isSavings));
     const firstBudget = 6;
     orderedBudgets.forEach((b, i) => {
         const r = firstBudget + i;
-        const kind: Kind = isSavingsCategory(b.category) ? "Tabungan" : "Pengeluaran";
+        const kind: Kind = b.isSavings ? "Tabungan" : "Pengeluaran";
         const row = budgetSheet.getRow(r);
         row.values = [b.category, kind, b.limit, b.spent];
         setFormula(row.getCell(5), `C${r}-D${r}`, b.limit - b.spent);
@@ -323,7 +324,7 @@ export function buildMonthlyReport(ExcelJS: typeof import("exceljs"), { monthLab
 
     let budgetTotalRow = lastBudget + 2;
     for (const kind of ["Pengeluaran", "Tabungan"] as const) {
-        const rows = orderedBudgets.filter((b) => isSavingsCategory(b.category) === (kind === "Tabungan"));
+        const rows = orderedBudgets.filter((b) => b.isSavings === (kind === "Tabungan"));
         if (rows.length === 0) continue;
         const r = budgetTotalRow;
         const row = budgetSheet.getRow(r);
@@ -347,7 +348,7 @@ export function buildMonthlyReport(ExcelJS: typeof import("exceljs"), { monthLab
 }
 
 // exceljs cukup besar, jadi baru dimuat saat user menekan tombol export
-export async function exportMonthToExcel(options: { monthLabel: string; transactions: Transaction[]; budgets: BudgetRow[] }) {
+export async function exportMonthToExcel(options: { monthLabel: string; transactions: Transaction[]; budgets: BudgetRow[]; savingsCategories: ReadonlySet<string> }) {
     const ExcelJS = await import("exceljs");
     const workbook = buildMonthlyReport(ExcelJS.default ?? ExcelJS, options);
 
