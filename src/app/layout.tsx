@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { config } from "@fortawesome/fontawesome-svg-core";
 import "@fortawesome/fontawesome-svg-core/styles.css";
@@ -24,6 +24,15 @@ export const metadata: Metadata = {
     icon: "/logo-spending-tracker.png",
     apple: { url: "/apple-touch-icon.png", sizes: "180x180" },
   },
+  appleWebApp: {
+    title: "Spending Track",
+    statusBarStyle: "default",
+  },
+};
+
+// Warna bilah status/judul browser saat app dibuka dari layar utama
+export const viewport: Viewport = {
+  themeColor: "#5356ff",
 };
 
 export default function RootLayout({
