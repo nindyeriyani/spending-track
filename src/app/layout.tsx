@@ -22,7 +22,7 @@ export const metadata: Metadata = {
   description: "Catatan pemasukan, pengeluaran, budget, dan target keuangan",
   icons: {
     icon: "/logo-spending-tracker.png",
-    apple: "/logo-spending-tracker.png",
+    apple: { url: "/apple-touch-icon.png", sizes: "180x180" },
   },
 };
 
