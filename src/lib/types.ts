@@ -7,7 +7,8 @@ export type TransactionType = "income" | "expense";
 export interface TransactionInput {
     type: TransactionType;
     amount: number;
-    category: string;
+    category: string; // nama kategori saat ditulis; cadangan kalau kategorinya sudah dihapus
+    categoryId?: string; // dokumen lama belum punya field ini sampai dimigrasi (lihat src/lib/categories.ts)
     date: string; // "YYYY-MM-DD", tanggal lokal
     note: string;
     createdAt?: Timestamp; // waktu input; transaksi lama tidak punya field ini
@@ -39,6 +40,7 @@ export interface GoalInput {
     targetAmount: number;
     currentAmount: number;
     category?: string;
+    categoryId?: string;
 }
 
 export interface Goal extends GoalInput {
@@ -49,6 +51,7 @@ export interface Goal extends GoalInput {
 // ID dokumen = ID kategori, jadi satu kategori hanya punya satu budget yang berlaku tiap bulan.
 export interface BudgetInput {
     category: string;
+    categoryId?: string;
     limit: number;
 }
 

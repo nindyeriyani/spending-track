@@ -10,7 +10,7 @@ import AmountInput from "@/components/AmountInput";
 import Auth from "@/components/Auth";
 import { auth, db } from "@/lib/firebase";
 import { monthKey, parseLocalDate } from "@/lib/date";
-import { addDefaultCategories, categoriesFor, categoryIcon as iconFor } from "@/lib/categories";
+import { addDefaultCategories, categoriesFor, categoryIdFor, categoryIcon as iconFor, missingCategoryIds, withCurrentCategoryNames } from "@/lib/categories";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faArrowRight, faBuildingColumns, faBullseye, faCheck, faCircleQuestion, faTriangleExclamation, faXmark } from "@fortawesome/free-solid-svg-icons";
 import { goalSaved, isGoalReached } from "@/lib/goals";
@@ -29,12 +29,11 @@ import {
   deleteDoc,
   setDoc,
   doc,
-  orderBy,
-  writeBatch,
-  type DocumentReference
+  orderBy
 } from "firebase/firestore";
 
 type Tab = "overview" | "budget" | "goals";
+
 
 // Jumlah transaksi yang tampil di Home sebelum tombol "Lihat semua"
 const ACTIVITY_PREVIEW_COUNT = 10;
@@ -57,14 +56,15 @@ type EditableBudget = Omit<Budget, "limit"> & { limit: string };
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
-  const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
-  const [goals, setGoals] = useState<Goal[]>([]);
+  // Data apa adanya dari Firestore; yang dipakai di UI adalah versi dengan nama kategori terkini (di bawah)
+  const [storedTransactions, setStoredTransactions] = useState<Transaction[]>([]);
+  const [storedGoals, setStoredGoals] = useState<Goal[]>([]);
   const [mounted, setMounted] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [dataLoading, setDataLoading] = useState(true);
   const [goalsLoading, setGoalsLoading] = useState(true);
-  const [budgets, setBudgets] = useState<Budget[]>([]);
+  const [storedBudgets, setStoredBudgets] = useState<Budget[]>([]);
   const [budgetsLoading, setBudgetsLoading] = useState(true);
   const [categories, setCategories] = useState<Category[]>([]);
   const [managingCategories, setManagingCategories] = useState(false);
@@ -147,9 +147,9 @@ export default function Home() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       // Bersihkan data akun sebelumnya agar tidak terlihat oleh akun berikutnya
-      setRecentTransactions([]);
-      setGoals([]);
-      setBudgets([]);
+      setStoredTransactions([]);
+      setStoredGoals([]);
+      setStoredBudgets([]);
       setCategories([]);
       setManagingCategories(false);
       setDataLoading(true);
@@ -181,7 +181,7 @@ export default function Home() {
       const txs = snapshot.docs
         .map(doc => ({ id: doc.id, ...(doc.data({ serverTimestamps: "estimate" }) as TransactionInput) }))
         .sort((a, b) => (b.createdAt?.toMillis() ?? 0) - (a.createdAt?.toMillis() ?? 0) || b.date.localeCompare(a.date));
-      setRecentTransactions(txs);
+      setStoredTransactions(txs);
       setDataLoading(false);
     }, (err) => {
       console.error("Failed to load transactions:", err);
@@ -197,7 +197,7 @@ export default function Home() {
     const q = collection(db, "users", user.uid, "goals");
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const gs = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as GoalInput) }));
-      setGoals(gs);
+      setStoredGoals(gs);
       setGoalsLoading(false);
     }, (err) => {
       console.error("Failed to load goals:", err);
@@ -212,7 +212,7 @@ export default function Home() {
     if (!user) return;
     const q = collection(db, "users", user.uid, "budgets");
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setBudgets(snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as BudgetInput) })));
+      setStoredBudgets(snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as BudgetInput) })));
       setBudgetsLoading(false);
     }, (err) => {
       console.error("Failed to load budgets:", err);
@@ -237,6 +237,30 @@ export default function Home() {
     });
     return () => unsubscribe();
   }, [user, showAlert]);
+
+  const recentTransactions = useMemo(() => withCurrentCategoryNames(storedTransactions, categories), [storedTransactions, categories]);
+  const goals = useMemo(() => withCurrentCategoryNames(storedGoals, categories), [storedGoals, categories]);
+  const budgets = useMemo(() => withCurrentCategoryNames(storedBudgets, categories), [storedBudgets, categories]);
+
+  // Lengkapi `categoryId` pada dokumen lama yang hanya menyimpan nama kategori (dicocokkan dengan nama
+  // kategori yang ada). Ditulis per dokumen supaya satu dokumen lama yang ditolak rules tidak menggagalkan
+  // yang lain, dan tiap dokumen dicoba sekali per sesi supaya tulisan yang ditolak tidak diulang terus.
+  const migratedDocs = useRef(new Set<string>());
+  useEffect(() => {
+    if (!user) return;
+    const expenseOnly = categories.filter((c) => c.type === "expense");
+    const updates = [
+      ...missingCategoryIds(storedTransactions, categories, (tx) => tx.type).map(([tx, id]) => ["transactions", tx.id, id]),
+      ...missingCategoryIds(storedBudgets, expenseOnly, () => "expense").map(([b, id]) => ["budgets", b.id, id]),
+      ...missingCategoryIds(storedGoals, expenseOnly, () => "expense").map(([g, id]) => ["goals", g.id, id]),
+    ];
+    for (const [path, docId, categoryId] of updates) {
+      const ref = doc(db, "users", user.uid, path, docId);
+      if (migratedDocs.current.has(ref.path)) continue;
+      migratedDocs.current.add(ref.path);
+      updateDoc(ref, { categoryId }).catch((err) => console.error(`Gagal melengkapi categoryId ${ref.path}:`, err));
+    }
+  }, [user, categories, storedTransactions, storedBudgets, storedGoals]);
 
   const expenseCategories = useMemo(() => categoriesFor(categories, "expense"), [categories]);
   const savingsCategories = useMemo(
@@ -363,7 +387,8 @@ export default function Home() {
 
   const handleAddExpense = (expense: TransactionInput) => {
     if (!user) return;
-    commit(addDoc(collection(db, "users", user.uid, "transactions"), { ...expense, createdAt: serverTimestamp() }), "Gagal menyimpan transaksi.");
+    const categoryId = categoryIdFor(categories, expense.category, expense.type);
+    commit(addDoc(collection(db, "users", user.uid, "transactions"), { ...expense, ...(categoryId && { categoryId }), createdAt: serverTimestamp() }), "Gagal menyimpan transaksi.");
 
     const notes: string[] = [];
     let isError = false;
@@ -410,7 +435,7 @@ export default function Home() {
     // ID dokumen = ID kategori, jadi satu kategori tidak bisa punya dua budget
     const category = expenseCategories.find((c) => c.name === budget.category);
     if (!category) throw new Error("Kategori tidak ditemukan.");
-    commit(setDoc(doc(db, "users", user.uid, "budgets", category.id), budget), "Gagal menyimpan budget.");
+    commit(setDoc(doc(db, "users", user.uid, "budgets", category.id), { ...budget, categoryId: category.id }), "Gagal menyimpan budget.");
   };
 
   const handleAddCategory = (category: CategoryInput) => {
@@ -418,34 +443,10 @@ export default function Home() {
     commit(addDoc(collection(db, "users", user.uid, "categories"), { ...category, createdAt: serverTimestamp() }), "Gagal menyimpan kategori.");
   };
 
-  // Transaksi, budget, dan target menyimpan nama kategori, jadi saat nama diganti semuanya ikut diperbarui
+  // Data lain merujuk kategori lewat `categoryId`, jadi cukup dokumen kategorinya yang diubah
   const handleUpdateCategory = (category: Category, changes: Pick<CategoryInput, "name" | "icon" | "savings">) => {
     if (!user) return;
-    const updates: [DocumentReference, Record<string, unknown>][] = [
-      [doc(db, "users", user.uid, "categories", category.id), changes],
-    ];
-    if (changes.name !== category.name) {
-      const renamed = { category: changes.name };
-      recentTransactions
-        .filter((tx) => tx.type === category.type && tx.category === category.name)
-        .forEach((tx) => updates.push([doc(db, "users", user.uid, "transactions", tx.id), renamed]));
-      if (category.type === "expense") {
-        budgets
-          .filter((b) => b.category === category.name)
-          .forEach((b) => updates.push([doc(db, "users", user.uid, "budgets", b.id), renamed]));
-        goals
-          .filter((g) => g.category === category.name)
-          .forEach((g) => updates.push([doc(db, "users", user.uid, "goals", g.id), renamed]));
-      }
-    }
-    // Satu batch Firestore maksimal 500 operasi
-    const batches: Promise<void>[] = [];
-    for (let i = 0; i < updates.length; i += 500) {
-      const batch = writeBatch(db);
-      updates.slice(i, i + 500).forEach(([ref, data]) => batch.update(ref, data));
-      batches.push(batch.commit());
-    }
-    commit(Promise.all(batches), "Gagal memperbarui kategori.");
+    commit(updateDoc(doc(db, "users", user.uid, "categories", category.id), changes), "Gagal memperbarui kategori.");
     showAlert(`Kategori "${changes.name}" berhasil diperbarui.`);
   };
 
@@ -472,7 +473,8 @@ export default function Home() {
 
   const handleAddGoal = (goal: GoalInput) => {
     if (!user) return;
-    commit(addDoc(collection(db, "users", user.uid, "goals"), goal), "Gagal menyimpan target.");
+    const categoryId = categoryIdFor(categories, goal.category, "expense");
+    commit(addDoc(collection(db, "users", user.uid, "goals"), { ...goal, ...(categoryId && { categoryId }) }), "Gagal menyimpan target.");
   };
 
   const handleSaveTransaction = (e: React.SubmitEvent) => {
@@ -491,9 +493,12 @@ export default function Home() {
       showAlert("Tanggal tidak valid.", "error");
       return;
     }
+    // Kategori yang sudah dihapus tidak punya ID baru; `categoryId` lama dibiarkan
+    const categoryId = categoryIdFor(categories, editingTransaction.category, editingTransaction.type);
     commit(updateDoc(doc(db, "users", user.uid, "transactions", editingTransaction.id), {
       type: editingTransaction.type,
       category: editingTransaction.category,
+      ...(categoryId && { categoryId }),
       date: editingTransaction.date,
       note: editingTransaction.note,
       amount
@@ -535,6 +540,8 @@ export default function Home() {
       targetAmount,
       ...(editingGoal.category ? { category: editingGoal.category } : {}),
     };
+    const categoryId = categoryIdFor(categories, editingGoal.category, "expense");
+    if (categoryId) updated.categoryId = categoryId;
     commit(setDoc(doc(db, "users", user.uid, "goals", editingGoal.id), updated), "Gagal memperbarui target.");
     const previous = goalRows.find((g) => g.id === editingGoal.id);
     const savedNow = goalSaved(updated, spentAllTime);

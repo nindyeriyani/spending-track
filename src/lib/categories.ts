@@ -10,7 +10,9 @@ import { db } from "./firebase";
 import type { Category, CategoryInput, TransactionType } from "./types";
 
 // Kategori dibuat sendiri oleh user (users/{uid}/categories). Transaksi, budget, dan target menyimpan
-// nama kategori, jadi data yang kategorinya sudah dihapus tetap tampil dengan ikon default.
+// `categoryId` beserta nama kategori saat ditulis. Saat dibaca, nama diganti dengan nama kategori terkini
+// (withCurrentCategoryNames), jadi ganti nama kategori cukup mengubah dokumen kategorinya. Nama tersimpan
+// hanya dipakai kalau kategorinya sudah dihapus; data itu tetap tampil dengan ikon default.
 // `savings: true` = uang yang disisihkan/ditabung, bukan dibelanjakan. Tetap dicatat sebagai pengeluaran
 // (uangnya keluar dari dana harian), tapi ditampilkan terpisah dan budget-nya dibaca sebagai target menabung.
 
@@ -71,4 +73,37 @@ export function addDefaultCategories(uid: string): Promise<void> {
         batch.set(doc(db, "users", uid, "categories", id), { ...category, createdAt: serverTimestamp() });
     });
     return batch.commit();
+}
+
+interface CategoryRef {
+    category?: string;
+    categoryId?: string;
+}
+
+// Kategori dengan nama tersebut (nama unik per user); `type` membedakan pengeluaran dan pemasukan
+export function categoryIdFor(categories: readonly Category[], name: string | undefined, type: TransactionType): string | undefined {
+    return categories.find((c) => c.name === name && c.type === type)?.id;
+}
+
+// Ganti nama kategori tersimpan dengan nama terkini, supaya logika yang mengelompokkan per nama tetap benar
+export function withCurrentCategoryNames<T extends CategoryRef>(items: T[], categories: readonly Category[]): T[] {
+    const names = new Map(categories.map((c) => [c.id, c.name]));
+    return items.map((item) => {
+        const name = item.categoryId && names.get(item.categoryId);
+        return name && name !== item.category ? { ...item, category: name } : item;
+    });
+}
+
+// Dokumen lama hanya menyimpan nama kategori. Kembalikan dokumen yang belum punya `categoryId`
+// beserta ID kategori yang namanya cocok, supaya bisa dilengkapi.
+export function missingCategoryIds<T extends CategoryRef & { id: string }>(
+    items: readonly T[], categories: readonly Category[], typeOf: (item: T) => TransactionType,
+): [T, string][] {
+    const result: [T, string][] = [];
+    for (const item of items) {
+        if (item.categoryId || !item.category) continue;
+        const id = categoryIdFor(categories, item.category, typeOf(item));
+        if (id) result.push([item, id]);
+    }
+    return result;
 }
