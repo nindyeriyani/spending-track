@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { auth } from "@/lib/firebase";
 import { addDefaultCategories } from "@/lib/categories";
 import {
@@ -279,6 +280,11 @@ export default function Auth() {
                     >
                         {isLogin ? "Daftar" : "Masuk"}
                     </button>
+                </p>
+
+                <p className="text-center text-xs text-muted-foreground mt-4">
+                    Dengan {isLogin ? "masuk" : "mendaftar"}, Anda menyetujui{" "}
+                    <Link href="/privacy" className="text-primary font-bold hover:underline">Kebijakan Privasi</Link>.
                 </p>
             </div>
 

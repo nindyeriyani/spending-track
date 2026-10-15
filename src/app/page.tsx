@@ -6,6 +6,7 @@ import AddExpenseForm from "@/components/AddExpenseForm";
 import AddGoalForm from "@/components/AddGoalForm";
 import AddBudgetForm from "@/components/AddBudgetForm";
 import ManageCategories from "@/components/ManageCategories";
+import AccountMenu from "@/components/AccountMenu";
 import AmountInput from "@/components/AmountInput";
 import Auth from "@/components/Auth";
 import { auth, db } from "@/lib/firebase";
@@ -84,6 +85,7 @@ export default function Home() {
   // true setelah daftar kategori dikonfirmasi server (bukan hanya dari cache perangkat)
   const [categoriesSynced, setCategoriesSynced] = useState(false);
   const [managingCategories, setManagingCategories] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   // URL foto profil yang gagal dimuat; avatar lalu memakai huruf pertama email
   const [brokenPhotoURL, setBrokenPhotoURL] = useState<string | null>(null);
 
@@ -170,6 +172,7 @@ export default function Home() {
       setCategories([]);
       setCategoriesSynced(false);
       setManagingCategories(false);
+      setAccountOpen(false);
       setGoalsLoading(true);
       setBudgetsLoading(true);
       setEditingGoal(null);
@@ -456,6 +459,7 @@ export default function Home() {
   );
 
   const handleLogout = async () => {
+    setAccountOpen(false);
     showConfirm("Yakin ingin keluar dari akun?", async () => {
       closeAlert();
       try {
@@ -765,9 +769,9 @@ export default function Home() {
             </button>
             <button
               type="button"
-              onClick={handleLogout}
-              aria-label={`Keluar dari akun ${user.email ?? ""}`}
-              title="Keluar"
+              onClick={() => setAccountOpen(true)}
+              aria-label={`Akun ${user.email ?? ""}`}
+              title="Akun"
               className="relative w-10 h-10 rounded-full border-2 border-primary/20 p-0.5 ring-2 ring-primary/5 hover:ring-primary/40 transition-all active:scale-95"
             >
               {user.photoURL && user.photoURL !== brokenPhotoURL ? (
@@ -1152,6 +1156,10 @@ export default function Home() {
             onDelete={handleDeleteCategory}
             onClose={() => setManagingCategories(false)}
           />
+        )}
+
+        {accountOpen && (
+          <AccountMenu user={user} onLogout={handleLogout} onClose={() => setAccountOpen(false)} />
         )}
 
         {/* Custom Premium Alert */}
