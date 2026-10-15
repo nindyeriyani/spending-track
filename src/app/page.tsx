@@ -29,10 +29,22 @@ import {
   deleteDoc,
   setDoc,
   doc,
-  orderBy
+  orderBy,
+  where,
+  getDocs,
+  type QuerySnapshot
 } from "firebase/firestore";
 
 type Tab = "overview" | "budget" | "goals";
+
+function snapshotTransactions(snapshot: QuerySnapshot): Transaction[] {
+  return snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data({ serverTimestamps: "estimate" }) as TransactionInput) }));
+}
+
+// Urutkan dari yang paling terakhir diinput; transaksi lama tanpa `createdAt` ditaruh di bawah, urut tanggal
+function sortByInputTime(txs: Transaction[]): Transaction[] {
+  return txs.sort((a, b) => (b.createdAt?.toMillis() ?? 0) - (a.createdAt?.toMillis() ?? 0) || b.date.localeCompare(a.date));
+}
 
 
 // Jumlah transaksi yang tampil di Home sebelum tombol "Lihat semua"
@@ -57,16 +69,20 @@ type EditableBudget = Omit<Budget, "limit"> & { limit: string };
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   // Data apa adanya dari Firestore; yang dipakai di UI adalah versi dengan nama kategori terkini (di bawah)
-  const [storedTransactions, setStoredTransactions] = useState<Transaction[]>([]);
+  // Transaksi tidak dimuat semuanya: hanya per bulan (bulan yang dilihat + bulan berjalan, per monthKey)
+  // dan transaksi kategori yang terhubung ke target (per kunci dari goalLinkKey)
+  const [monthTransactions, setMonthTransactions] = useState<Record<string, Transaction[]>>({});
+  const [linkedTransactions, setLinkedTransactions] = useState<Record<string, Transaction[]>>({});
   const [storedGoals, setStoredGoals] = useState<Goal[]>([]);
   const [mounted, setMounted] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [dataLoading, setDataLoading] = useState(true);
   const [goalsLoading, setGoalsLoading] = useState(true);
   const [storedBudgets, setStoredBudgets] = useState<Budget[]>([]);
   const [budgetsLoading, setBudgetsLoading] = useState(true);
   const [categories, setCategories] = useState<Category[]>([]);
+  // true setelah daftar kategori dikonfirmasi server (bukan hanya dari cache perangkat)
+  const [categoriesSynced, setCategoriesSynced] = useState(false);
   const [managingCategories, setManagingCategories] = useState(false);
   // URL foto profil yang gagal dimuat; avatar lalu memakai huruf pertama email
   const [brokenPhotoURL, setBrokenPhotoURL] = useState<string | null>(null);
@@ -147,12 +163,13 @@ export default function Home() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       // Bersihkan data akun sebelumnya agar tidak terlihat oleh akun berikutnya
-      setStoredTransactions([]);
+      setMonthTransactions({});
+      setLinkedTransactions({});
       setStoredGoals([]);
       setStoredBudgets([]);
       setCategories([]);
+      setCategoriesSynced(false);
       setManagingCategories(false);
-      setDataLoading(true);
       setGoalsLoading(true);
       setBudgetsLoading(true);
       setEditingGoal(null);
@@ -169,27 +186,34 @@ export default function Home() {
     return () => unsubscribe();
   }, []);
 
-  // Sync Transactions
+  // Sync Transactions: bulan yang dilihat dan bulan berjalan (untuk peringatan budget saat mencatat hari ini)
+  const viewedMonthKey = monthKey(currentMonth);
+  const todayMonthKey = monthKey(today);
+  const loadedMonths = useMemo(
+    () => [...new Set([viewedMonthKey, todayMonthKey])],
+    [viewedMonthKey, todayMonthKey]
+  );
+
   useEffect(() => {
     if (!user) return;
-    const q = query(
-      collection(db, "users", user.uid, "transactions"),
-      orderBy("date", "desc")
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      // Urutkan dari yang paling terakhir diinput; transaksi lama tanpa `createdAt` ditaruh di bawah, urut tanggal
-      const txs = snapshot.docs
-        .map(doc => ({ id: doc.id, ...(doc.data({ serverTimestamps: "estimate" }) as TransactionInput) }))
-        .sort((a, b) => (b.createdAt?.toMillis() ?? 0) - (a.createdAt?.toMillis() ?? 0) || b.date.localeCompare(a.date));
-      setStoredTransactions(txs);
-      setDataLoading(false);
-    }, (err) => {
-      console.error("Failed to load transactions:", err);
-      setDataLoading(false);
-      showAlert("Gagal memuat transaksi.", "error");
+    const unsubscribes = loadedMonths.map((key) => {
+      // `date` berformat "YYYY-MM-DD", jadi satu bulan = rentang string "YYYY-MM-01" sampai "YYYY-MM-31"
+      const q = query(
+        collection(db, "users", user.uid, "transactions"),
+        where("date", ">=", `${key}-01`),
+        where("date", "<=", `${key}-31`),
+        orderBy("date", "desc")
+      );
+      return onSnapshot(q, (snapshot) => {
+        setMonthTransactions((prev) => ({ ...prev, [key]: sortByInputTime(snapshotTransactions(snapshot)) }));
+      }, (err) => {
+        console.error("Failed to load transactions:", err);
+        setMonthTransactions((prev) => ({ ...prev, [key]: prev[key] ?? [] }));
+        showAlert("Gagal memuat transaksi.", "error");
+      });
     });
-    return () => unsubscribe();
-  }, [user, showAlert]);
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+  }, [user, loadedMonths, showAlert]);
 
   // Sync Goals
   useEffect(() => {
@@ -226,7 +250,8 @@ export default function Home() {
   useEffect(() => {
     if (!user) return;
     const q = collection(db, "users", user.uid, "categories");
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribe = onSnapshot(q, { includeMetadataChanges: true }, (snapshot) => {
+      if (!snapshot.metadata.fromCache) setCategoriesSynced(true);
       setCategories(snapshot.docs
         .map(doc => ({ id: doc.id, ...(doc.data({ serverTimestamps: "estimate" }) as CategoryInput) }))
         // Kategori bawaan dibuat bersamaan (waktunya sama), jadi diurutkan lagi menurut ID-nya
@@ -238,6 +263,12 @@ export default function Home() {
     return () => unsubscribe();
   }, [user, showAlert]);
 
+  // Bulan lain yang pernah dibuka bisa masih tersimpan di state, tapi listener-nya sudah berhenti, jadi diabaikan
+  const storedTransactions = useMemo(
+    () => loadedMonths.flatMap((key) => monthTransactions[key] ?? []),
+    [loadedMonths, monthTransactions]
+  );
+  const dataLoading = !(viewedMonthKey in monthTransactions);
   const recentTransactions = useMemo(() => withCurrentCategoryNames(storedTransactions, categories), [storedTransactions, categories]);
   const goals = useMemo(() => withCurrentCategoryNames(storedGoals, categories), [storedGoals, categories]);
   const budgets = useMemo(() => withCurrentCategoryNames(storedBudgets, categories), [storedBudgets, categories]);
@@ -261,6 +292,34 @@ export default function Home() {
       updateDoc(ref, { categoryId }).catch((err) => console.error(`Gagal melengkapi categoryId ${ref.path}:`, err));
     }
   }, [user, categories, storedTransactions, storedBudgets, storedGoals]);
+
+  // Transaksi lama di bulan yang tidak dibuka tidak ikut termuat, jadi sekali per perangkat semua transaksi
+  // dibaca untuk dilengkapi `categoryId`. Menunggu kategori dari server supaya pencocokan nama tidak
+  // memakai cache yang kosong atau usang.
+  const fullMigrationStarted = useRef(false);
+  useEffect(() => {
+    if (!user || !categoriesSynced || fullMigrationStarted.current) return;
+    const flagKey = `categoryId-migrated:${user.uid}`;
+    try {
+      if (localStorage.getItem(flagKey)) return;
+    } catch {
+      // Storage tidak tersedia (mis. mode privat): tetap jalankan, paling banyak sekali per sesi
+    }
+    fullMigrationStarted.current = true;
+    getDocs(collection(db, "users", user.uid, "transactions"))
+      .then((snapshot) => Promise.allSettled(
+        missingCategoryIds(snapshotTransactions(snapshot), categories, (tx) => tx.type)
+          .map(([tx, categoryId]) => updateDoc(doc(db, "users", user.uid, "transactions", tx.id), { categoryId }))
+      ))
+      .then((results) => {
+        results.forEach((r) => { if (r.status === "rejected") console.error("Gagal melengkapi categoryId:", r.reason); });
+        try { localStorage.setItem(flagKey, "1"); } catch { /* lihat di atas */ }
+      })
+      .catch((err) => {
+        console.error("Gagal membaca transaksi untuk migrasi categoryId:", err);
+        fullMigrationStarted.current = false;
+      });
+  }, [user, categoriesSynced, categories]);
 
   const expenseCategories = useMemo(() => categoriesFor(categories, "expense"), [categories]);
   const savingsCategories = useMemo(
@@ -338,7 +397,45 @@ export default function Home() {
   }, [budgets, spentThisMonth]);
 
   // Progres target yang terhubung ke kategori dihitung dari semua transaksi, bukan hanya bulan yang dilihat
-  const spentAllTime = useMemo(() => spentByCategory(recentTransactions), [recentTransactions]);
+  // Kategori yang terhubung ke target (termasuk yang sedang dipilih di form edit target). Transaksinya
+  // dimuat terpisah dari daftar bulanan karena progres target dihitung sepanjang waktu.
+  // Kunci "id:<categoryId>", atau "name:<nama>" untuk kategori yang sudah dihapus (tidak punya ID lagi)
+  const editingGoalCategory = editingGoal?.category;
+  const goalLinks = useMemo(() => {
+    const names = new Set(goals.map((g) => g.category).filter((name): name is string => !!name));
+    if (editingGoalCategory) names.add(editingGoalCategory);
+    return [...names].map((name) => {
+      const categoryId = categoryIdFor(categories, name, "expense");
+      return categoryId ? `id:${categoryId}` : `name:${name}`;
+    });
+  }, [goals, editingGoalCategory, categories]);
+  // String supaya listener hanya dipasang ulang saat daftar kategorinya benar-benar berubah
+  const goalLinksKey = JSON.stringify(goalLinks);
+
+  useEffect(() => {
+    if (!user) return;
+    const unsubscribes = (JSON.parse(goalLinksKey) as string[]).map((key) => {
+      const [field, value] = key.startsWith("id:") ? ["categoryId", key.slice(3)] : ["category", key.slice(5)];
+      const q = query(
+        collection(db, "users", user.uid, "transactions"),
+        where(field, "==", value),
+        where("type", "==", "expense")
+      );
+      return onSnapshot(q, (snapshot) => {
+        setLinkedTransactions((prev) => ({ ...prev, [key]: snapshotTransactions(snapshot) }));
+      }, (err) => {
+        console.error("Failed to load goal transactions:", err);
+        showAlert("Gagal memuat progres target.", "error");
+      });
+    });
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+  }, [user, goalLinksKey, showAlert]);
+
+  const spentAllTime = useMemo(() => {
+    const byId = new Map<string, Transaction>();
+    goalLinks.forEach((key) => linkedTransactions[key]?.forEach((tx) => byId.set(tx.id, tx)));
+    return spentByCategory(withCurrentCategoryNames([...byId.values()], categories));
+  }, [goalLinks, linkedTransactions, categories]);
 
   const goalRows = useMemo(
     () => goals.map((g) => {
@@ -400,7 +497,8 @@ export default function Home() {
     }
     // Peringatkan kalau pengeluaran ini membuat budget kategorinya hampir habis atau terlampaui
     const budget = budgets.find((b) => b.category === expense.category);
-    if (expense.type === "expense" && budget) {
+    // Hanya bulan yang sedang dimuat yang bisa dihitung (bulan yang dilihat dan bulan berjalan)
+    if (expense.type === "expense" && budget && loadedMonths.includes(expenseMonth)) {
       const before = recentTransactions
         .filter((tx) => tx.type === "expense" && tx.category === expense.category && tx.date.startsWith(expenseMonth))
         .reduce((sum, tx) => sum + tx.amount, 0);
