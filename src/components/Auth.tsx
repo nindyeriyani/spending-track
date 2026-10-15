@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import { auth } from "@/lib/firebase";
+import { addDefaultCategories } from "@/lib/categories";
 import {
     signInWithEmailAndPassword,
     createUserWithEmailAndPassword,
@@ -10,7 +11,9 @@ import {
     signInWithRedirect,
     getRedirectResult,
     sendPasswordResetEmail,
-    GoogleAuthProvider
+    GoogleAuthProvider,
+    getAdditionalUserInfo,
+    type UserCredential
 } from "firebase/auth";
 import { errorCode } from "@/lib/types";
 
@@ -33,6 +36,13 @@ function authErrorMessage(err: unknown, fallback: string): string {
     return (code && AUTH_ERROR_MESSAGES[code]) || fallback;
 }
 
+// Akun yang baru dibuat langsung diberi kategori bawaan. Tidak ditunggu: saat offline tulisan
+// diantrekan Firestore dan promise-nya baru selesai setelah tersinkron.
+function setUpNewAccount(credential: UserCredential | null) {
+    if (!credential || !getAdditionalUserInfo(credential)?.isNewUser) return;
+    addDefaultCategories(credential.user.uid).catch((err) => console.error("Gagal membuat kategori bawaan:", err));
+}
+
 export default function Auth() {
     const [isLogin, setIsLogin] = useState(true);
     const [email, setEmail] = useState("");
@@ -46,7 +56,10 @@ export default function Auth() {
     // Selesaikan login redirect (cadangan kalau popup diblokir)
     useEffect(() => {
         getRedirectResult(auth)
-            .then(() => setRedirectProcessing(false))
+            .then((credential) => {
+                setUpNewAccount(credential);
+                setRedirectProcessing(false);
+            })
             .catch((err) => {
                 console.error("Redirect Auth Error:", err);
                 if (errorCode(err) !== "auth/no-auth-event") {
@@ -87,7 +100,7 @@ export default function Auth() {
             if (isLogin) {
                 await signInWithEmailAndPassword(auth, email, password);
             } else {
-                await createUserWithEmailAndPassword(auth, email, password);
+                setUpNewAccount(await createUserWithEmailAndPassword(auth, email, password));
             }
         } catch (err) {
             console.error(err);
@@ -107,7 +120,7 @@ export default function Auth() {
         // signInWithRedirect sering kembali ke halaman login tanpa error kalau app tidak
         // di-host di authDomain Firebase. Redirect hanya cadangan saat popup diblokir.
         try {
-            await signInWithPopup(auth, provider);
+            setUpNewAccount(await signInWithPopup(auth, provider));
         } catch (err) {
             console.error(err);
             const code = errorCode(err);

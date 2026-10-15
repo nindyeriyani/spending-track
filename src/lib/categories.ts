@@ -5,7 +5,9 @@ import {
     faMotorcycle, faPiggyBank, faPlane, faPumpSoap, faSackDollar, faScrewdriverWrench, faShirt, faStar, faUsers,
     faUtensils, faWallet, faWifi,
 } from "@fortawesome/free-solid-svg-icons";
-import type { Category, TransactionType } from "./types";
+import { doc, serverTimestamp, writeBatch } from "firebase/firestore";
+import { db } from "./firebase";
+import type { Category, CategoryInput, TransactionType } from "./types";
 
 // Kategori dibuat sendiri oleh user (users/{uid}/categories). Transaksi, budget, dan target menyimpan
 // nama kategori, jadi data yang kategorinya sudah dihapus tetap tampil dengan ikon default.
@@ -39,4 +41,34 @@ export function isSavingsCategory(categories: readonly Category[], name: string)
 
 export function categoryIcon(categories: readonly Category[], name: string): IconDefinition {
     return iconByName(categories.find((c) => c.name === name)?.icon);
+}
+
+// Kategori awal untuk akun baru, supaya bisa langsung mencatat. Nama harus unik lintas jenis.
+const DEFAULT_CATEGORIES: readonly Omit<CategoryInput, "createdAt">[] = [
+    { name: "Makan & Minum", icon: faUtensils.iconName, type: "expense", savings: false },
+    { name: "Transportasi", icon: faMotorcycle.iconName, type: "expense", savings: false },
+    { name: "Belanja", icon: faCartShopping.iconName, type: "expense", savings: false },
+    { name: "Tagihan & Listrik", icon: faBolt.iconName, type: "expense", savings: false },
+    { name: "Pulsa & Internet", icon: faWifi.iconName, type: "expense", savings: false },
+    { name: "Kesehatan", icon: faHeartPulse.iconName, type: "expense", savings: false },
+    { name: "Hiburan", icon: faFilm.iconName, type: "expense", savings: false },
+    { name: "Pendidikan", icon: faGraduationCap.iconName, type: "expense", savings: false },
+    { name: "Sedekah & Donasi", icon: faHandHoldingHeart.iconName, type: "expense", savings: false },
+    { name: "Tabungan", icon: faPiggyBank.iconName, type: "expense", savings: true },
+    { name: "Lainnya", icon: faBox.iconName, type: "expense", savings: false },
+    { name: "Gaji", icon: faBriefcase.iconName, type: "income", savings: false },
+    { name: "Bonus", icon: faGift.iconName, type: "income", savings: false },
+    { name: "Usaha", icon: faSackDollar.iconName, type: "income", savings: false },
+    { name: "Pemasukan Lain", icon: faMoneyBillWave.iconName, type: "income", savings: false },
+];
+
+// ID dokumen tetap ("default-01", ...), jadi kalau terpanggil dua kali (mis. dua tab) kategorinya tidak dobel.
+// Hanya dipanggil untuk akun yang belum punya kategori, sehingga tidak menimpa kategori buatan user.
+export function addDefaultCategories(uid: string): Promise<void> {
+    const batch = writeBatch(db);
+    DEFAULT_CATEGORIES.forEach((category, i) => {
+        const id = `default-${String(i + 1).padStart(2, "0")}`;
+        batch.set(doc(db, "users", uid, "categories", id), { ...category, createdAt: serverTimestamp() });
+    });
+    return batch.commit();
 }

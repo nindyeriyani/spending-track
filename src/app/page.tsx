@@ -10,7 +10,7 @@ import AmountInput from "@/components/AmountInput";
 import Auth from "@/components/Auth";
 import { auth, db } from "@/lib/firebase";
 import { monthKey, parseLocalDate } from "@/lib/date";
-import { categoriesFor, categoryIcon as iconFor } from "@/lib/categories";
+import { addDefaultCategories, categoriesFor, categoryIcon as iconFor } from "@/lib/categories";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faArrowRight, faBuildingColumns, faBullseye, faCheck, faCircleQuestion, faTriangleExclamation, faXmark } from "@fortawesome/free-solid-svg-icons";
 import { goalSaved, isGoalReached } from "@/lib/goals";
@@ -29,7 +29,9 @@ import {
   deleteDoc,
   setDoc,
   doc,
-  orderBy
+  orderBy,
+  writeBatch,
+  type DocumentReference
 } from "firebase/firestore";
 
 type Tab = "overview" | "budget" | "goals";
@@ -227,7 +229,8 @@ export default function Home() {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setCategories(snapshot.docs
         .map(doc => ({ id: doc.id, ...(doc.data({ serverTimestamps: "estimate" }) as CategoryInput) }))
-        .sort((a, b) => (a.createdAt?.toMillis() ?? 0) - (b.createdAt?.toMillis() ?? 0)));
+        // Kategori bawaan dibuat bersamaan (waktunya sama), jadi diurutkan lagi menurut ID-nya
+        .sort((a, b) => (a.createdAt?.toMillis() ?? 0) - (b.createdAt?.toMillis() ?? 0) || a.id.localeCompare(b.id)));
     }, (err) => {
       console.error("Failed to load categories:", err);
       showAlert("Gagal memuat kategori.", "error");
@@ -413,6 +416,37 @@ export default function Home() {
   const handleAddCategory = (category: CategoryInput) => {
     if (!user) return;
     commit(addDoc(collection(db, "users", user.uid, "categories"), { ...category, createdAt: serverTimestamp() }), "Gagal menyimpan kategori.");
+  };
+
+  // Transaksi, budget, dan target menyimpan nama kategori, jadi saat nama diganti semuanya ikut diperbarui
+  const handleUpdateCategory = (category: Category, changes: Pick<CategoryInput, "name" | "icon" | "savings">) => {
+    if (!user) return;
+    const updates: [DocumentReference, Record<string, unknown>][] = [
+      [doc(db, "users", user.uid, "categories", category.id), changes],
+    ];
+    if (changes.name !== category.name) {
+      const renamed = { category: changes.name };
+      recentTransactions
+        .filter((tx) => tx.type === category.type && tx.category === category.name)
+        .forEach((tx) => updates.push([doc(db, "users", user.uid, "transactions", tx.id), renamed]));
+      if (category.type === "expense") {
+        budgets
+          .filter((b) => b.category === category.name)
+          .forEach((b) => updates.push([doc(db, "users", user.uid, "budgets", b.id), renamed]));
+        goals
+          .filter((g) => g.category === category.name)
+          .forEach((g) => updates.push([doc(db, "users", user.uid, "goals", g.id), renamed]));
+      }
+    }
+    // Satu batch Firestore maksimal 500 operasi
+    const batches: Promise<void>[] = [];
+    for (let i = 0; i < updates.length; i += 500) {
+      const batch = writeBatch(db);
+      updates.slice(i, i + 500).forEach(([ref, data]) => batch.update(ref, data));
+      batches.push(batch.commit());
+    }
+    commit(Promise.all(batches), "Gagal memperbarui kategori.");
+    showAlert(`Kategori "${changes.name}" berhasil diperbarui.`);
   };
 
   const handleDeleteCategory = (category: Category) => {
@@ -1008,6 +1042,8 @@ export default function Home() {
           <ManageCategories
             categories={categories}
             onAdd={handleAddCategory}
+            onUpdate={handleUpdateCategory}
+            onAddDefaults={() => user && commit(addDefaultCategories(user.uid), "Gagal menambahkan kategori bawaan.")}
             onDelete={handleDeleteCategory}
             onClose={() => setManagingCategories(false)}
           />
