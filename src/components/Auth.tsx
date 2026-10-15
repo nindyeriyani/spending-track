@@ -30,11 +30,16 @@ const AUTH_ERROR_MESSAGES: Record<string, string> = {
     "auth/network-request-failed": "Koneksi bermasalah. Periksa internet Anda.",
     "auth/user-disabled": "Akun ini telah dinonaktifkan.",
     "auth/missing-email": "Isi email terlebih dahulu.",
+    "auth/missing-password": "Isi password terlebih dahulu.",
+    "auth/password-does-not-meet-requirements": "Password belum memenuhi syarat keamanan.",
+    "auth/operation-not-allowed": "Metode login ini belum diaktifkan. Hubungi pengelola aplikasi.",
 };
 
+// Kode error yang belum punya pesan ikut ditampilkan supaya penyebabnya bisa dilacak
 function authErrorMessage(err: unknown, fallback: string): string {
     const code = errorCode(err);
-    return (code && AUTH_ERROR_MESSAGES[code]) || fallback;
+    if (!code) return fallback;
+    return AUTH_ERROR_MESSAGES[code] ?? `${fallback} (${code})`;
 }
 
 // Akun yang baru dibuat langsung diberi kategori bawaan. Tidak ditunggu: saat offline tulisan
@@ -105,7 +110,7 @@ export default function Auth() {
             }
         } catch (err) {
             console.error(err);
-            setError(authErrorMessage(err, "Gagal masuk. Silakan coba lagi."));
+            setError(authErrorMessage(err, isLogin ? "Gagal masuk. Silakan coba lagi." : "Gagal mendaftar. Silakan coba lagi."));
         } finally {
             setLoading(false);
         }
