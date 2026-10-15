@@ -148,7 +148,7 @@ export default function Auth() {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-[#f0f4f8] p-4 relative overflow-hidden">
+        <main className="min-h-screen flex items-center justify-center bg-[#f0f4f8] p-4 relative overflow-hidden">
             {/* Background Decor */}
             <div className="absolute top-[-10%] right-[-10%] w-[40%] h-[40%] bg-primary/10 rounded-full blur-3xl animate-pulse" />
             <div className="absolute bottom-[-10%] left-[-10%] w-[30%] h-[30%] bg-primary/5 rounded-full blur-3xl" />
@@ -178,7 +178,7 @@ export default function Auth() {
                 )}
 
                 {info && (
-                    <div className="mb-6 p-4 rounded-xl bg-success/10 border border-success/20 text-success text-sm font-medium">
+                    <div className="mb-6 p-4 rounded-xl bg-success/10 border border-success/20 text-success-strong text-sm font-medium">
                         {info}
                     </div>
                 )}
@@ -300,6 +300,6 @@ export default function Auth() {
                     <p className="font-bold tracking-wide animate-pulse uppercase text-xs">Menyelesaikan Login...</p>
                 </div>
             )}
-        </div>
+        </main>
     );
 }

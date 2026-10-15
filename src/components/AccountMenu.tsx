@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
+import Dialog from "./Dialog";
 import Link from "next/link";
 import type { User } from "firebase/auth";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -31,6 +32,7 @@ export default function AccountMenu({ user, onLogout, onClose }: {
     const [deleting, setDeleting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const needsPassword = signsInWithPassword(user);
+    const titleId = useId();
 
     const handleDelete = async (e: React.SubmitEvent) => {
         e.preventDefault();
@@ -66,11 +68,12 @@ export default function AccountMenu({ user, onLogout, onClose }: {
     };
 
     return (
-        <div className="fixed inset-0 z-70 flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-[fade-in_0.2s_ease-out]">
+        // Selama proses hapus berjalan, pop up tidak bisa ditutup (termasuk dengan Esc)
+        <Dialog labelledBy={titleId} onClose={deleting ? undefined : onClose} className="fixed inset-0 z-70 flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-[fade-in_0.2s_ease-out]">
             <div className="w-full max-w-sm max-h-[90vh] overflow-y-auto premium-card p-8 flex flex-col gap-6 animate-[slide-up_0.3s_ease-out]">
                 <div className="flex justify-between items-center gap-3">
                     <div className="min-w-0">
-                        <h3 className="text-xl font-bold">{confirmingDelete ? "Hapus Akun" : "Akun"}</h3>
+                        <h2 id={titleId} className="text-xl font-bold">{confirmingDelete ? "Hapus Akun" : "Akun"}</h2>
                         <p className="text-sm text-muted-foreground truncate">{user.email}</p>
                     </div>
                     <button type="button" aria-label="Tutup" onClick={onClose} disabled={deleting} className="text-muted-foreground hover:text-foreground w-10 h-10 flex items-center justify-center rounded-full hover:bg-muted transition-colors shrink-0 disabled:opacity-50">
@@ -165,6 +168,6 @@ export default function AccountMenu({ user, onLogout, onClose }: {
                     </form>
                 )}
             </div>
-        </div>
+        </Dialog>
     );
 }

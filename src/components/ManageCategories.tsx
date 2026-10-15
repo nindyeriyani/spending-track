@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
+import Dialog from "./Dialog";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faPen, faPlus, faXmark } from "@fortawesome/free-solid-svg-icons";
 import { CATEGORY_ICONS, DEFAULT_CATEGORY_ICON, categoriesFor, iconByName } from "@/lib/categories";
@@ -27,6 +28,7 @@ export default function ManageCategories({ categories, onAdd, onUpdate, onDelete
     const [icon, setIcon] = useState<string>(DEFAULT_CATEGORY_ICON);
     const [savings, setSavings] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const ids = useId();
 
     const openForm = (category: Category | null, defaultType: TransactionType = "expense") => {
         setEditing(category);
@@ -62,10 +64,10 @@ export default function ManageCategories({ categories, onAdd, onUpdate, onDelete
     };
 
     return (
-        <div className="fixed inset-0 z-70 flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-[fade-in_0.2s_ease-out]">
+        <Dialog labelledBy={`${ids}-title`} onClose={onClose} className="fixed inset-0 z-70 flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-[fade-in_0.2s_ease-out]">
             <div className="w-full max-w-sm max-h-[90vh] overflow-y-auto premium-card p-8 flex flex-col gap-6 animate-[slide-up_0.3s_ease-out]">
                 <div className="flex justify-between items-center">
-                    <h3 className="text-xl font-bold">Kategori</h3>
+                    <h2 id={`${ids}-title`} className="text-xl font-bold">Kategori</h2>
                     <button type="button" aria-label="Tutup" onClick={onClose} className="text-muted-foreground hover:text-foreground w-10 h-10 flex items-center justify-center rounded-full hover:bg-muted transition-colors">
                         <CloseIcon />
                     </button>
@@ -90,9 +92,9 @@ export default function ManageCategories({ categories, onAdd, onUpdate, onDelete
                     return (
                         <div key={t} className="flex flex-col gap-2">
                             <div className="flex justify-between items-center px-1">
-                                <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-widest">
-                                    {label} <span className="opacity-60">({list.length})</span>
-                                </h4>
+                                <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-widest">
+                                    {label} <span className="font-medium">({list.length})</span>
+                                </h3>
                                 <button
                                     type="button"
                                     onClick={() => openForm(null, t)}
@@ -137,10 +139,10 @@ export default function ManageCategories({ categories, onAdd, onUpdate, onDelete
             </div>
 
             {formOpen && (
-                <div className="fixed inset-0 z-80 flex items-center justify-center p-6 bg-black/40 animate-[fade-in_0.2s_ease-out]">
+                <Dialog labelledBy={`${ids}-form-title`} onClose={closeForm} className="fixed inset-0 z-80 flex items-center justify-center p-6 bg-black/40 animate-[fade-in_0.2s_ease-out]">
                     <form onSubmit={handleSubmit} className="w-full max-w-sm max-h-[90vh] overflow-y-auto premium-card p-8 flex flex-col gap-4 animate-[slide-up_0.3s_ease-out]">
                         <div className="flex justify-between items-center">
-                            <h3 className="text-xl font-bold">{editing ? "Edit Kategori" : "Tambah Kategori"}</h3>
+                            <h2 id={`${ids}-form-title`} className="text-xl font-bold">{editing ? "Edit Kategori" : "Tambah Kategori"}</h2>
                             <button type="button" aria-label="Tutup" onClick={closeForm} className="text-muted-foreground hover:text-foreground w-10 h-10 flex items-center justify-center rounded-full hover:bg-muted transition-colors">
                                 <CloseIcon />
                             </button>
@@ -152,11 +154,12 @@ export default function ManageCategories({ categories, onAdd, onUpdate, onDelete
                                 Kategori {editing.type === "expense" ? "pengeluaran" : "pemasukan"}
                             </p>
                         ) : (
-                            <div className="flex p-1 bg-muted rounded-2xl">
+                            <div className="flex p-1 bg-muted rounded-2xl" role="group" aria-label="Jenis kategori">
                                 {(["expense", "income"] as const).map((t) => (
                                     <button
                                         key={t}
                                         type="button"
+                                        aria-pressed={type === t}
                                         onClick={() => setType(t)}
                                         className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${type === t ? "bg-background shadow-sm text-foreground" : "text-muted-foreground"}`}
                                     >
@@ -173,10 +176,11 @@ export default function ManageCategories({ categories, onAdd, onUpdate, onDelete
                         )}
 
                         <div className="flex flex-col gap-1.5">
-                            <label className="text-[10px] font-bold text-muted-foreground uppercase ml-1">Nama</label>
+                            <label htmlFor={`${ids}-name`} className="text-[10px] font-bold text-muted-foreground uppercase ml-1">Nama</label>
                             <div className="flex items-center gap-3 bg-muted rounded-2xl pl-4 focus-within:ring-2 ring-primary transition-all">
                                 <FontAwesomeIcon icon={iconByName(icon)} className="text-primary shrink-0" />
                                 <input
+                                    id={`${ids}-name`}
                                     type="text"
                                     maxLength={50}
                                     placeholder={type === "expense" ? "mis. Makan" : "mis. Gaji"}
@@ -188,8 +192,8 @@ export default function ManageCategories({ categories, onAdd, onUpdate, onDelete
                         </div>
 
                         <div className="flex flex-col gap-1.5">
-                            <label className="text-[10px] font-bold text-muted-foreground uppercase ml-1">Ikon</label>
-                            <div className="grid grid-cols-6 gap-1.5">
+                            <p id={`${ids}-icon`} className="text-[10px] font-bold text-muted-foreground uppercase ml-1">Ikon</p>
+                            <div className="grid grid-cols-6 gap-1.5" role="group" aria-labelledby={`${ids}-icon`}>
                                 {CATEGORY_ICONS.map((def) => (
                                     <button
                                         key={def.iconName}
@@ -231,8 +235,8 @@ export default function ManageCategories({ categories, onAdd, onUpdate, onDelete
                             </button>
                         </div>
                     </form>
-                </div>
+                </Dialog>
             )}
-        </div>
+        </Dialog>
     );
 }

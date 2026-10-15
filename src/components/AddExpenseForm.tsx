@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
+import Dialog from "./Dialog";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faXmark } from "@fortawesome/free-solid-svg-icons";
 import AmountInput from "@/components/AmountInput";
@@ -10,6 +11,7 @@ import { errorMessage, type Category, type TransactionInput } from "@/lib/types"
 
 export default function AddExpenseForm({ onAdd, categories, onManageCategories, trigger, onOpenChange }: { onAdd?: (expense: TransactionInput) => Promise<void> | void, categories: readonly Category[], onManageCategories: () => void, trigger?: React.ReactNode, onOpenChange?: (open: boolean) => void }) {
     const [isOpen, setIsOpen] = useState(false);
+    const titleId = useId();
 
     const toggleOpen = (open: boolean) => {
         // Tanggal default selalu hari ini saat form dibuka, walau app dibiarkan terbuka lewat tengah malam
@@ -81,10 +83,10 @@ export default function AddExpenseForm({ onAdd, categories, onManageCategories, 
             )}
 
             {isOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-[fade-in_0.2s_ease-out]">
+                <Dialog labelledBy={titleId} onClose={() => toggleOpen(false)} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-[fade-in_0.2s_ease-out]">
                     <div className="glass w-full max-w-md rounded-2xl p-6 shadow-2xl animate-[slide-up_0.3s_ease-out]">
                         <div className="flex justify-between items-center mb-6">
-                            <h2 className="text-xl font-bold text-foreground">Tambah Transaksi</h2>
+                            <h2 id={titleId} className="text-xl font-bold text-foreground">Tambah Transaksi</h2>
                             <button
                                 type="button"
                                 aria-label="Tutup"
@@ -102,10 +104,11 @@ export default function AddExpenseForm({ onAdd, categories, onManageCategories, 
                         )}
 
                         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-                            <div className="flex p-1 bg-muted rounded-xl">
+                            <div className="flex p-1 bg-muted rounded-xl" role="group" aria-label="Jenis transaksi">
                                 <button
                                     type="button"
                                     disabled={loading}
+                                    aria-pressed={formData.type === "expense"}
                                     onClick={() => setFormData({ ...formData, type: "expense" })}
                                     className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${formData.type === "expense" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
                                 >
@@ -114,6 +117,7 @@ export default function AddExpenseForm({ onAdd, categories, onManageCategories, 
                                 <button
                                     type="button"
                                     disabled={loading}
+                                    aria-pressed={formData.type === "income"}
                                     onClick={() => setFormData({ ...formData, type: "income" })}
                                     className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${formData.type === "income" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
                                 >
@@ -122,8 +126,9 @@ export default function AddExpenseForm({ onAdd, categories, onManageCategories, 
                             </div>
 
                             <div className="flex flex-col gap-1.5">
-                                <label className="text-sm font-medium text-foreground">Jumlah (Rp)</label>
+                                <label htmlFor={`${titleId}-1`} className="text-sm font-medium text-foreground">Jumlah (Rp)</label>
                                 <AmountInput
+                                    id={`${titleId}-1`}
                                     autoFocus
                                     required
                                     disabled={loading}
@@ -137,7 +142,7 @@ export default function AddExpenseForm({ onAdd, categories, onManageCategories, 
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="flex flex-col gap-1.5">
                                     <div className="flex justify-between items-center">
-                                        <label className="text-sm font-medium text-foreground">Kategori</label>
+                                        <label htmlFor={`${titleId}-2`} className="text-sm font-medium text-foreground">Kategori</label>
                                         <button type="button" onClick={onManageCategories} disabled={loading} className="text-xs font-bold text-primary hover:underline">
                                             + Baru
                                         </button>
@@ -153,6 +158,7 @@ export default function AddExpenseForm({ onAdd, categories, onManageCategories, 
                                         </button>
                                     ) : (
                                         <select
+                                            id={`${titleId}-2`}
                                             value={category}
                                             disabled={loading}
                                             onChange={(e) => setFormData({ ...formData, category: e.target.value })}
@@ -166,8 +172,9 @@ export default function AddExpenseForm({ onAdd, categories, onManageCategories, 
                                 </div>
 
                                 <div className="flex flex-col gap-1.5">
-                                    <label className="text-sm font-medium text-foreground">Tanggal</label>
+                                    <label htmlFor={`${titleId}-3`} className="text-sm font-medium text-foreground">Tanggal</label>
                                     <input
+                                        id={`${titleId}-3`}
                                         type="date"
                                         required
                                         disabled={loading}
@@ -179,8 +186,9 @@ export default function AddExpenseForm({ onAdd, categories, onManageCategories, 
                             </div>
 
                             <div className="flex flex-col gap-1.5">
-                                <label className="text-sm font-medium text-foreground">Catatan (opsional)</label>
+                                <label htmlFor={`${titleId}-4`} className="text-sm font-medium text-foreground">Catatan (opsional)</label>
                                 <input
+                                    id={`${titleId}-4`}
                                     type="text"
                                     disabled={loading}
                                     placeholder="Untuk apa?"
@@ -200,7 +208,7 @@ export default function AddExpenseForm({ onAdd, categories, onManageCategories, 
                             </button>
                         </form>
                     </div>
-                </div>
+                </Dialog>
             )}
         </>
     );

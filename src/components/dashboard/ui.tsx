@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
+import Dialog from "@/components/Dialog";
 
 export function CloseIcon({ size = 20 }: { size?: number }) {
     return (
@@ -22,11 +23,12 @@ export function ModalForm({ title, onSubmit, onClose, submitClassName = "", chil
     submitClassName?: string;
     children: ReactNode;
 }) {
+    const titleId = useId();
     return (
-        <div className="fixed inset-0 z-60 flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-[fade-in_0.2s_ease-out]">
+        <Dialog labelledBy={titleId} onClose={onClose} className="fixed inset-0 z-60 flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-[fade-in_0.2s_ease-out]">
             <form onSubmit={onSubmit} className="w-full max-w-sm premium-card p-8 flex flex-col gap-6 animate-[slide-up_0.3s_ease-out]">
                 <div className="flex justify-between items-center">
-                    <h3 className="text-xl font-bold">{title}</h3>
+                    <h2 id={titleId} className="text-xl font-bold">{title}</h2>
                     <button type="button" aria-label="Tutup" onClick={onClose} className="text-muted-foreground hover:text-foreground w-10 h-10 flex items-center justify-center rounded-full hover:bg-muted transition-colors">
                         <CloseIcon />
                     </button>
@@ -39,10 +41,17 @@ export function ModalForm({ title, onSubmit, onClose, submitClassName = "", chil
                     Simpan Perubahan
                 </button>
             </form>
-        </div>
+        </Dialog>
     );
 }
 
-export function FieldLabel({ children }: { children: ReactNode }) {
-    return <label className="text-[10px] font-bold text-muted-foreground uppercase ml-1">{children}</label>;
+// Label yang terhubung ke inputnya (dibaca pembaca layar dan bisa diketuk untuk fokus ke input)
+export function Field({ label, children }: { label: ReactNode; children: (id: string) => ReactNode }) {
+    const id = useId();
+    return (
+        <div className="flex flex-col gap-1.5">
+            <label htmlFor={id} className="text-[10px] font-bold text-muted-foreground uppercase ml-1">{label}</label>
+            {children(id)}
+        </div>
+    );
 }

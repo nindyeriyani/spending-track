@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
+import Dialog from "./Dialog";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faXmark } from "@fortawesome/free-solid-svg-icons";
 import AmountInput from "@/components/AmountInput";
@@ -9,6 +10,7 @@ import { errorMessage, type BudgetInput, type Category } from "@/lib/types";
 // `categories` hanya berisi kategori yang belum punya budget
 export default function AddBudgetForm({ onAdd, categories, trigger, onOpenChange }: { onAdd?: (budget: BudgetInput) => Promise<void> | void, categories: readonly Category[], trigger?: React.ReactNode, onOpenChange?: (open: boolean) => void }) {
     const [isOpen, setIsOpen] = useState(false);
+    const titleId = useId();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [formData, setFormData] = useState({ category: "", limit: "" });
@@ -63,10 +65,10 @@ export default function AddBudgetForm({ onAdd, categories, trigger, onOpenChange
             )}
 
             {isOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-[fade-in_0.2s_ease-out]">
+                <Dialog labelledBy={titleId} onClose={() => toggleOpen(false)} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-[fade-in_0.2s_ease-out]">
                     <div className="glass w-full max-w-md rounded-2xl p-6 shadow-2xl animate-[slide-up_0.3s_ease-out]">
                         <div className="flex justify-between items-center mb-6">
-                            <h2 className="text-xl font-bold text-foreground">Tambah Budget Bulanan</h2>
+                            <h2 id={titleId} className="text-xl font-bold text-foreground">Tambah Budget Bulanan</h2>
                             <button
                                 type="button"
                                 aria-label="Tutup"
@@ -85,8 +87,9 @@ export default function AddBudgetForm({ onAdd, categories, trigger, onOpenChange
 
                         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
                             <div className="flex flex-col gap-1.5">
-                                <label className="text-sm font-medium text-foreground">Kategori</label>
+                                <label htmlFor={`${titleId}-1`} className="text-sm font-medium text-foreground">Kategori</label>
                                 <select
+                                    id={`${titleId}-1`}
                                     required
                                     disabled={loading}
                                     value={formData.category}
@@ -100,8 +103,9 @@ export default function AddBudgetForm({ onAdd, categories, trigger, onOpenChange
                             </div>
 
                             <div className="flex flex-col gap-1.5">
-                                <label className="text-sm font-medium text-foreground">Batas per Bulan (Rp)</label>
+                                <label htmlFor={`${titleId}-2`} className="text-sm font-medium text-foreground">Batas per Bulan (Rp)</label>
                                 <AmountInput
+                                    id={`${titleId}-2`}
                                     required
                                     autoFocus
                                     disabled={loading}
@@ -123,7 +127,7 @@ export default function AddBudgetForm({ onAdd, categories, trigger, onOpenChange
                             </button>
                         </form>
                     </div>
-                </div>
+                </Dialog>
             )}
         </>
     );
