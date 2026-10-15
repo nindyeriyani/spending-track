@@ -1,9 +1,8 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, type Firestore } from "firebase/firestore";
+import { connectAuthEmulator, getAuth } from "firebase/auth";
+import { connectFirestoreEmulator, getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, type Firestore } from "firebase/firestore";
 
-// TODO: Replace with your Firebase project configuration
-// You can find this in Firebase Console -> Project Settings -> General -> Your apps
+// Diisi dari .env.local (Firebase Console -> Project Settings -> General -> Your apps)
 const firebaseConfig = {
     apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
     authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -18,6 +17,12 @@ const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 // getAuth di browser sudah memakai persistence lokal (sesi bertahan setelah tab ditutup)
 const auth = getAuth(app);
 const db = createFirestore();
+
+// NEXT_PUBLIC_FIREBASE_EMULATORS=true memakai emulator lokal (`npm run emulators`), bukan project asli
+if (process.env.NEXT_PUBLIC_FIREBASE_EMULATORS === "true" && typeof window !== "undefined" && !auth.emulatorConfig) {
+    connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+    connectFirestoreEmulator(db, "127.0.0.1", 8080);
+}
 
 // Di browser, data dan tulisan yang belum tersinkron disimpan di IndexedDB,
 // jadi transaksi yang dicatat saat offline tidak hilang walau tab ditutup.
